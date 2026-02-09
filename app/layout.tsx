@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Launcher | Product Registry",
+  title: "Interview Coach",
   description:
-    "Launcher helps indie founders organize products, pitches, and launch plans in one place.",
+    "Voice-first AI mock interviews with role-specific questions, follow-ups, and scorecards.",
 };
 
 export default function RootLayout({
