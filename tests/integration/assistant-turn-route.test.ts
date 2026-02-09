@@ -57,6 +57,21 @@ describe("assistant-turn route", () => {
     expect(response.status).toBe(404);
   });
 
+  it("returns 409 if session is terminal/scoring", async () => {
+    getInterviewSessionById.mockReturnValue({
+      ...baseSession,
+      status: "completed",
+      phase: "done",
+    });
+
+    const response = await POST(
+      new Request("http://localhost", { method: "POST", body: JSON.stringify({}) }),
+      { params: Promise.resolve({ id: "s1" }) }
+    );
+
+    expect(response.status).toBe(409);
+  });
+
   it("persists candidate metadata and transitions kickoff -> intro", async () => {
     nextAssistantTurn.mockReturnValue({ kind: "kickoff", content: "Welcome" });
 

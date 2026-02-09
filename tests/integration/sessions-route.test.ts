@@ -84,4 +84,43 @@ describe("/api/interview/sessions", () => {
     );
     expect(body.session.id).toBe("s1");
   });
+
+  it("rejects oversized job description", async () => {
+    const request = new Request("http://localhost/api/interview/sessions", {
+      method: "POST",
+      body: JSON.stringify({
+        targetCompany: "Acme",
+        roleTitle: "Engineer",
+        jobDescription: "x".repeat(10_001),
+        mode: "time",
+      }),
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(400);
+  });
+
+  it("sanitizes html/script tags before persistence", async () => {
+    createInterviewSession.mockReturnValue({ id: "s2" });
+
+    const request = new Request("http://localhost/api/interview/sessions", {
+      method: "POST",
+      body: JSON.stringify({
+        targetCompany: "Acme",
+        roleTitle: "Engineer",
+        jobDescription: "<script>alert(1)</script><b>Build APIs</b>",
+        customQuestions: "<i>How did you scale it?</i>",
+        mode: "time",
+      }),
+    });
+
+    await POST(request);
+
+    expect(createInterviewSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobDescription: "Build APIs",
+        customQuestions: "How did you scale it?",
+      })
+    );
+  });
 });

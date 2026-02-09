@@ -23,6 +23,8 @@ type DimensionScore = {
   recommendedFix?: string;
 };
 
+const scorecardInFlight = new Set<string>();
+
 const dimensionLabels: Record<InterviewScoreDimension, string> = {
   star_structure: "STAR structure",
   specificity: "specificity",
@@ -172,12 +174,26 @@ function deriveSummary(
 }
 
 export async function POST(_request: Request, context: SessionRouteContext) {
+  const { id } = await context.params;
+
+  if (scorecardInFlight.has(id)) {
+    return NextResponse.json({ error: "Scorecard generation in progress" }, { status: 409 });
+  }
+
+  scorecardInFlight.add(id);
+
   try {
-    const { id } = await context.params;
     const bundle = getInterviewSessionBundle(id);
 
     if (!bundle) {
       return NextResponse.json({ error: "Interview session not found" }, { status: 404 });
+    }
+
+    if (bundle.session.status === "in_progress") {
+      return NextResponse.json(
+        { error: "Interview still in progress" },
+        { status: 409 }
+      );
     }
 
     const candidateMessages = bundle.messages.filter((m) => m.role === "candidate");
@@ -245,5 +261,7 @@ export async function POST(_request: Request, context: SessionRouteContext) {
   } catch (error) {
     console.error("Error generating scorecard", error);
     return NextResponse.json({ error: "Unable to generate scorecard" }, { status: 500 });
+  } finally {
+    scorecardInFlight.delete(id);
   }
 }

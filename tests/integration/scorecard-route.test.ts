@@ -15,7 +15,7 @@ const { POST } = await import("@/app/api/interview/sessions/[id]/scorecard/route
 const baseBundle = {
   session: {
     id: "s1",
-    status: "in_progress",
+    status: "completed",
     phase: "scoring",
     endedAt: null,
   },
@@ -62,6 +62,19 @@ describe("scorecard route", () => {
     });
 
     expect(response.status).toBe(404);
+  });
+
+  it("returns 409 while interview is still in progress", async () => {
+    getInterviewSessionBundle.mockReturnValue({
+      ...baseBundle,
+      session: { ...baseBundle.session, status: "in_progress", phase: "question" },
+    });
+
+    const response = await POST(new Request("http://localhost", { method: "POST" }), {
+      params: Promise.resolve({ id: "s1" }),
+    });
+
+    expect(response.status).toBe(409);
   });
 
   it("returns 400 if no candidate answers", async () => {

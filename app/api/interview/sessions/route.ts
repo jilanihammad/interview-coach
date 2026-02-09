@@ -10,12 +10,22 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const MAX_JOB_DESCRIPTION_CHARS = 10_000;
+const MAX_CUSTOM_QUESTIONS_CHARS = 5_000;
+
 function isInterviewMode(value: unknown): value is InterviewMode {
   return value === "time" || value === "question_count";
 }
 
 function isInterviewPersonality(value: unknown): value is InterviewPersonality {
   return interviewPersonalityOptions.some((option) => option.value === value);
+}
+
+function sanitizeText(input: string): string {
+  return input
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .trim();
 }
 
 export async function GET() {
@@ -38,8 +48,8 @@ export async function POST(request: Request) {
     const targetCompany = String(body?.targetCompany ?? "").trim();
     const roleTitle = String(body?.roleTitle ?? "").trim();
     const roleLevel = String(body?.roleLevel ?? "").trim();
-    const jobDescription = String(body?.jobDescription ?? "").trim();
-    const customQuestions = String(body?.customQuestions ?? "").trim();
+    const jobDescription = sanitizeText(String(body?.jobDescription ?? ""));
+    const customQuestions = sanitizeText(String(body?.customQuestions ?? ""));
     const personality = body?.personality;
     const mode = body?.mode;
     const useTimeBudget = body?.useTimeBudget !== undefined ? Boolean(body.useTimeBudget) : true;
@@ -50,6 +60,20 @@ export async function POST(request: Request) {
           error:
             "targetCompany, roleTitle, jobDescription, and mode (time|question_count) are required",
         },
+        { status: 400 }
+      );
+    }
+
+    if (jobDescription.length > MAX_JOB_DESCRIPTION_CHARS) {
+      return NextResponse.json(
+        { error: `Job description exceeds maximum length (${MAX_JOB_DESCRIPTION_CHARS} chars)` },
+        { status: 400 }
+      );
+    }
+
+    if (customQuestions.length > MAX_CUSTOM_QUESTIONS_CHARS) {
+      return NextResponse.json(
+        { error: `Custom questions exceed maximum length (${MAX_CUSTOM_QUESTIONS_CHARS} chars)` },
         { status: 400 }
       );
     }

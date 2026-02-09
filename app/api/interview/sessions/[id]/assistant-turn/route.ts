@@ -13,12 +13,32 @@ type SessionRouteContext = { params: Promise<{ id: string }> };
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const processingTurns = new Set<string>();
+
+function isSessionLockedForTurns(status: string, phase: string): boolean {
+  return status === "cancelled" || status === "completed" || phase === "scoring" || phase === "done";
+}
+
 export async function POST(request: Request, context: SessionRouteContext) {
+  const { id } = await context.params;
+
+  if (processingTurns.has(id)) {
+    return NextResponse.json({ error: "Turn already in progress" }, { status: 409 });
+  }
+
+  processingTurns.add(id);
+
   try {
-    const { id } = await context.params;
     const session = getInterviewSessionById(id);
     if (!session) {
       return NextResponse.json({ error: "Interview session not found" }, { status: 404 });
+    }
+
+    if (isSessionLockedForTurns(session.status, session.phase)) {
+      return NextResponse.json(
+        { error: "Session is not accepting more turns" },
+        { status: 409 }
+      );
     }
 
     const body = await request.json();
@@ -77,5 +97,7 @@ export async function POST(request: Request, context: SessionRouteContext) {
       { error: "Unable to generate assistant turn" },
       { status: 500 }
     );
+  } finally {
+    processingTurns.delete(id);
   }
 }
