@@ -91,11 +91,6 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
     return `${session.targetQuestionCount ?? 5} questions`;
   }, [session]);
 
-  const latestAssistantMessage = useMemo(
-    () => [...messages].reverse().find((m) => m.role === "assistant")?.content ?? "",
-    [messages]
-  );
-
   const loadSession = async () => {
     if (!sessionId) {
       setError("Missing session id");
@@ -439,6 +434,16 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
     stopSpeaking();
   };
 
+  const handleToggleSpeak = () => {
+    if (isListening) {
+      handleStopListening();
+      return;
+    }
+
+    handleStopVoicePlayback();
+    handleStartListening();
+  };
+
   const handleVoiceProviderChange = (next: VoiceProvider) => {
     if (next === "server" && !voiceCapabilities.serverVoiceAvailable) {
       fallbackToBrowserVoice("Server voice is not configured. Staying on browser voice.");
@@ -485,21 +490,6 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
                 Start
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={() => speakText(latestAssistantMessage)}
-              disabled={!latestAssistantMessage}
-              className="rounded border border-slate-700 px-3 py-2 text-xs text-white disabled:opacity-50"
-            >
-              Speak last prompt
-            </button>
-            <button
-              type="button"
-              onClick={handleStopVoicePlayback}
-              className="rounded border border-slate-700 px-3 py-2 text-xs text-white"
-            >
-              Stop voice
-            </button>
             <button
               type="button"
               onClick={handleEndSession}
@@ -567,34 +557,29 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  type="submit"
-                  disabled={sending || !candidateAnswer.trim()}
-                  className="rounded bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-50"
+                  type="button"
+                  onClick={handleToggleSpeak}
+                  disabled={isTranscribing || (!speechSupported && !voiceCapabilities.sttServerAvailable)}
+                  className={`rounded border px-3 py-2 text-xs font-semibold ${
+                    isListening
+                      ? "border-red-400/50 text-red-200"
+                      : "border-emerald-400/50 text-emerald-200"
+                  } disabled:opacity-50`}
                 >
-                  Send answer
+                  {isListening ? "Stop speak" : "Start speak"}
                 </button>
 
-                {speechSupported || voiceCapabilities.sttServerAvailable ? (
-                  isListening ? (
-                    <button
-                      type="button"
-                      onClick={handleStopListening}
-                      className="rounded border border-red-400/50 px-3 py-2 text-xs text-red-200"
-                    >
-                      Stop mic
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleStartListening}
-                      className="rounded border border-emerald-400/50 px-3 py-2 text-xs text-emerald-200"
-                    >
-                      Start mic
-                    </button>
-                  )
-                ) : (
+                <button
+                  type="submit"
+                  disabled={sending || isTranscribing || !candidateAnswer.trim()}
+                  className="rounded bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-50"
+                >
+                  Send
+                </button>
+
+                {!speechSupported && !voiceCapabilities.sttServerAvailable ? (
                   <span className="text-xs text-slate-500">Mic capture not supported here.</span>
-                )}
+                ) : null}
               </div>
 
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
