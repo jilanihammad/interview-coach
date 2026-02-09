@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getInterviewSessionById = vi.fn();
-const transcribeAudioWithDeepgram = vi.fn();
+const transcribeAudio = vi.fn();
 const synthesizeSpeech = vi.fn();
 const getVoiceCapabilities = vi.fn();
 
@@ -10,7 +10,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/interview/server-voice", () => ({
-  transcribeAudioWithDeepgram,
+  transcribeAudio,
   synthesizeSpeech,
   getVoiceCapabilities,
 }));
@@ -22,7 +22,7 @@ const voiceRoute = await import("@/app/api/interview/voice/route");
 describe("voice routes", () => {
   beforeEach(() => {
     getInterviewSessionById.mockReset();
-    transcribeAudioWithDeepgram.mockReset();
+    transcribeAudio.mockReset();
     synthesizeSpeech.mockReset();
     getVoiceCapabilities.mockReset();
 
@@ -34,6 +34,8 @@ describe("voice routes", () => {
       sttServerAvailable: true,
       ttsServerAvailable: false,
       serverVoiceAvailable: false,
+      activeSttProvider: "openai",
+      availableSttProviders: ["openai", "whisper"],
       activeTtsProvider: null,
       availableTtsProviders: [],
     });
@@ -69,7 +71,7 @@ describe("voice routes", () => {
   });
 
   it("stt returns transcript on success", async () => {
-    transcribeAudioWithDeepgram.mockResolvedValue("hello world");
+    transcribeAudio.mockResolvedValue("hello world");
 
     const form = new FormData();
     form.append("audio", new File([new Uint8Array([1, 2, 3])], "a.webm", { type: "audio/webm" }));
@@ -81,6 +83,19 @@ describe("voice routes", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.transcript).toBe("hello world");
+  });
+
+  it("stt maps timeout errors to 504", async () => {
+    transcribeAudio.mockRejectedValue(new Error("Whisper STT timed out"));
+
+    const form = new FormData();
+    form.append("audio", new File([new Uint8Array([1, 2, 3])], "a.webm", { type: "audio/webm" }));
+
+    const res = await sttRoute.POST(new Request("http://localhost", { method: "POST", body: form }), {
+      params: Promise.resolve({ id: "s1" }),
+    });
+
+    expect(res.status).toBe(504);
   });
 
   it("tts returns 400 for empty text", async () => {

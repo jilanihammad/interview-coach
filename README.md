@@ -8,7 +8,7 @@ Interview Coach is a voice-first mock interview app for tech candidates.
 - `/feedback` — structured scorecard page
 - API routes for sessions, messages, scores, assistant turn, and scorecard generation
 - Server voice endpoints:
-  - `POST /api/interview/sessions/:id/stt` (Deepgram prerecorded STT)
+  - `POST /api/interview/sessions/:id/stt` (provider-selectable STT: Deepgram, OpenAI, or local Whisper CLI)
   - `POST /api/interview/sessions/:id/tts` (provider-selectable TTS: ElevenLabs or OpenAI)
   - `GET /api/interview/voice` (provider capability check)
 - Interviewer + evaluator LLM provider support:
