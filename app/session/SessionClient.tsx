@@ -63,6 +63,7 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [candidateAnswer, setCandidateAnswer] = useState("");
+  const [draftResponseDurationSec, setDraftResponseDurationSec] = useState<number | null>(null);
 
   const [speechSupported, setSpeechSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -82,6 +83,7 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const responseStartedAtRef = useRef<number | null>(null);
 
   const timerLabel = useMemo(() => {
     if (!session) return "";
@@ -241,7 +243,10 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
     }
   };
 
-  const runAssistantTurn = async (payload?: { candidateAnswer?: string }) => {
+  const runAssistantTurn = async (payload?: {
+    candidateAnswer?: string;
+    responseDurationSec?: number;
+  }) => {
     const response = await fetch(`/api/interview/sessions/${sessionId}/assistant-turn`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -287,10 +292,21 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
       setSending(true);
       setError(null);
       const answer = candidateAnswer.trim();
+      const wordCount = answer.split(/\s+/).filter(Boolean).length;
+      const estimatedDurationSec = (wordCount / 130) * 60;
+      const responseDurationSec =
+        draftResponseDurationSec && draftResponseDurationSec > 0
+          ? draftResponseDurationSec
+          : Number(estimatedDurationSec.toFixed(1));
+
       setCandidateAnswer("");
       setInterimTranscript("");
+      setDraftResponseDurationSec(null);
 
-      await runAssistantTurn({ candidateAnswer: answer });
+      await runAssistantTurn({
+        candidateAnswer: answer,
+        responseDurationSec,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to send answer");
     } finally {
@@ -319,6 +335,13 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
     } finally {
       setSending(false);
     }
+  };
+
+  const captureResponseDuration = () => {
+    if (!responseStartedAtRef.current) return;
+    const duration = Math.max(0, (Date.now() - responseStartedAtRef.current) / 1000);
+    setDraftResponseDurationSec(Number(duration.toFixed(1)));
+    responseStartedAtRef.current = null;
   };
 
   const transcribeServerAudio = async (audioBlob: Blob) => {
@@ -407,6 +430,8 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
   };
 
   const handleStartListening = () => {
+    responseStartedAtRef.current = Date.now();
+    setDraftResponseDurationSec(null);
     if (voiceProvider === "server") {
       void startServerRecording();
       return;
@@ -419,6 +444,8 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
   };
 
   const handleStopListening = () => {
+    captureResponseDuration();
+
     if (voiceProvider === "server") {
       stopServerRecording();
       return;

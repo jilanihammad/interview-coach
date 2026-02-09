@@ -41,7 +41,7 @@ export function buildInterviewerSystemPrompt(input: InterviewPromptInput): strin
     `Target role: ${input.roleTitle}${input.roleLevel ? ` (${input.roleLevel})` : ""}.`,
     cadence,
     "Ask one question at a time.",
-    "After each candidate answer, ask up to 2 probing follow-up questions.",
+    "After each candidate answer, ask 3-5 probing follow-up questions depending on remaining interview time.",
     "Avoid giving feedback mid-session.",
     "At the end, summarize interview strengths and transition to evaluator handoff.",
     input.customQuestions?.trim()

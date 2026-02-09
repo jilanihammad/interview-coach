@@ -23,9 +23,19 @@ export async function POST(request: Request, context: SessionRouteContext) {
 
     const body = await request.json();
     const candidateAnswer = String(body?.candidateAnswer ?? "").trim();
+    const responseDurationSecRaw = Number(body?.responseDurationSec);
+    const responseDurationSec = Number.isFinite(responseDurationSecRaw)
+      ? Math.max(0, responseDurationSecRaw)
+      : undefined;
 
     if (candidateAnswer) {
-      addInterviewMessage(id, "candidate", candidateAnswer, { source: "turn" });
+      const wordCount = candidateAnswer.split(/\s+/).filter(Boolean).length;
+
+      addInterviewMessage(id, "candidate", candidateAnswer, {
+        source: "turn",
+        responseDurationSec,
+        wordCount,
+      });
     }
 
     const messages = listInterviewMessages(id);

@@ -50,6 +50,7 @@ export type InterviewSession = {
   jobDescription: string;
   customQuestions?: string;
   personality?: InterviewPersonality;
+  useTimeBudget?: boolean;
   mode: InterviewMode;
   targetDurationMinutes?: number;
   targetQuestionCount?: number;
@@ -86,6 +87,7 @@ export type CreateInterviewSessionInput = {
   jobDescription: string;
   customQuestions?: string;
   personality?: InterviewPersonality;
+  useTimeBudget?: boolean;
   mode: InterviewMode;
   targetDurationMinutes?: number;
   targetQuestionCount?: number;
@@ -95,4 +97,28 @@ export type InterviewSessionBundle = {
   session: InterviewSession;
   messages: InterviewMessage[];
   scores: InterviewScore[];
+};
+
+export type InterviewFrameworkSuggestion = {
+  name: string;
+  description: string;
+  template: string;
+};
+
+export type InterviewFocusArea = {
+  area: string;
+  reason: string;
+  practice: string;
+};
+
+export type InterviewFeedbackSummary = {
+  strengths: string[];
+  gaps: string[];
+  frameworkSuggestions: InterviewFrameworkSuggestion[];
+  focusAreas: InterviewFocusArea[];
+  stats: {
+    avgResponseTimeSec: number;
+    avgWordCount: number;
+    totalResponses: number;
+  };
 };

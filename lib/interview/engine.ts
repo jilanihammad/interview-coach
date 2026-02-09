@@ -12,31 +12,43 @@ const DEFAULT_QUESTION_BANK = [
 
 const FOLLOW_UP_BANKS = {
   default: [
-    "What was the measurable result, and what would you do differently next time?",
-    "What was your personal ownership versus the team contribution?",
-    "How did you prioritize when constraints changed?",
+    "what specific action did you personally take?",
+    "what was the measurable result?",
+    "what trade-off did you make and why?",
+    "what would you change if you ran this again?",
+    "how did you align stakeholders when tension increased?",
   ],
   friendly_probing: [
-    "That's helpful. Can you walk me through your exact decision process there?",
-    "Nice example. What was the measurable outcome and what did you personally drive?",
-    "If you replayed that situation, what would you change and why?",
+    "can you walk me through your decision process step by step?",
+    "what was your direct ownership versus team support?",
+    "what concrete outcome should we attribute to your actions?",
+    "if you replayed this, what would you do differently?",
+    "how did you know your approach was working?",
   ],
   direct_time_conscious: [
-    "Give me the result in one sentence with a metric.",
-    "What specifically did you own versus the team?",
-    "What was the key trade-off you made under time pressure?",
+    "give me your action in one sentence.",
+    "what metric moved, exactly?",
+    "what did you own personally?",
+    "what was the key trade-off under time pressure?",
+    "what would you fix next time?",
   ],
   skeptical_senior_leader: [
-    "What evidence proves your approach was the best option?",
-    "Why should I believe the impact was meaningful at org level?",
-    "What major risk did you overlook and how did you recover?",
+    "what hard evidence proves your approach worked?",
+    "why should I believe the impact was significant?",
+    "what risk did you underestimate?",
+    "what did you challenge in the existing plan?",
+    "where did your judgment outperform alternatives?",
   ],
   warm_supportive: [
-    "Great context. What outcome are you most proud of in that story?",
-    "What did you personally learn that changed how you work now?",
-    "What would be your stronger version of that answer in a real interview?",
+    "what are you most proud of in that example?",
+    "what did you personally contribute that mattered most?",
+    "what result best shows your impact?",
+    "what lesson changed how you work now?",
+    "how would you strengthen that answer in a real interview?",
   ],
 } as const;
+
+const LEGACY_MAX_FOLLOW_UPS = 2;
 
 function hasNumbers(text: string): boolean {
   return /\d|percent|%|ms|sec|hour|day|week|month|year/i.test(text);
@@ -62,25 +74,110 @@ function followUpBankForSession(session: InterviewSession): readonly string[] {
   return FOLLOW_UP_BANKS[session.personality] ?? FOLLOW_UP_BANKS.default;
 }
 
-function shouldAskFollowUp(answer: string, recentAssistantMessages: InterviewMessage[]): boolean {
-  const followUpsSinceLastQuestion = [...recentAssistantMessages]
-    .reverse()
-    .findIndex((m) => (m.meta as Record<string, unknown> | undefined)?.kind === "question");
+function getAssistantKind(message: InterviewMessage): string | undefined {
+  return (message.meta as Record<string, unknown> | undefined)?.kind as string | undefined;
+}
 
-  const followUpCount =
-    followUpsSinceLastQuestion === -1
-      ? recentAssistantMessages.filter(
-          (m) => (m.meta as Record<string, unknown> | undefined)?.kind === "follow_up"
-        ).length
-      : recentAssistantMessages
-          .slice(recentAssistantMessages.length - followUpsSinceLastQuestion)
-          .filter((m) => (m.meta as Record<string, unknown> | undefined)?.kind === "follow_up")
-          .length;
+function countCoreQuestionsAsked(assistantMessages: InterviewMessage[]): number {
+  return assistantMessages.filter((m) => getAssistantKind(m) === "question").length;
+}
 
-  if (followUpCount >= 2) return false;
-  if (answer.length < 220) return true;
-  if (!hasNumbers(answer)) return true;
-  return false;
+function countFollowUpsForCurrentQuestion(assistantMessages: InterviewMessage[]): number {
+  let count = 0;
+
+  for (let i = assistantMessages.length - 1; i >= 0; i -= 1) {
+    const kind = getAssistantKind(assistantMessages[i]);
+
+    if (kind === "question") break;
+    if (kind === "follow_up") count += 1;
+  }
+
+  return count;
+}
+
+function remainingTimeSeconds(session: InterviewSession): number {
+  const total = (session.targetDurationMinutes ?? 45) * 60;
+  if (!session.startedAt) return total;
+
+  const started = Date.parse(session.startedAt);
+  if (!Number.isFinite(started)) return total;
+
+  const elapsed = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  return Math.max(0, total - elapsed);
+}
+
+function clamp(min: number, value: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function computeFollowUpBudget(
+  session: InterviewSession,
+  assistantMessages: InterviewMessage[],
+  lastAnswer: string
+): number {
+  if (session.useTimeBudget === false) return LEGACY_MAX_FOLLOW_UPS;
+
+  const answerLooksThin = lastAnswer.length < 220 || !hasNumbers(lastAnswer);
+
+  if (session.mode === "time") {
+    const total = (session.targetDurationMinutes ?? 45) * 60;
+    const remaining = remainingTimeSeconds(session);
+    const ratio = total > 0 ? remaining / total : 0;
+
+    let budget = ratio > 0.66 ? 5 : ratio > 0.33 ? 4 : 3;
+    if (answerLooksThin) budget += 1;
+
+    return clamp(3, budget, 5);
+  }
+
+  const targetQuestions = session.targetQuestionCount ?? 5;
+  const coreAsked = countCoreQuestionsAsked(assistantMessages);
+  const remainingQuestions = Math.max(1, targetQuestions - coreAsked);
+
+  let budget = remainingQuestions <= 2 ? 4 : 3;
+  if (answerLooksThin) budget += 1;
+
+  return clamp(3, budget, 5);
+}
+
+function shouldAskFollowUp(
+  session: InterviewSession,
+  lastAnswer: string,
+  assistantMessages: InterviewMessage[]
+): boolean {
+  const followUpCount = countFollowUpsForCurrentQuestion(assistantMessages);
+  const followUpBudget = computeFollowUpBudget(session, assistantMessages, lastAnswer);
+  return followUpCount < followUpBudget;
+}
+
+function extractAnswerTopic(answer: string): string {
+  const sentence = answer
+    .split(/[.!?]\s+/)
+    .map((chunk) => chunk.trim())
+    .find((chunk) => chunk.length > 24);
+
+  const topic = (sentence || answer).replace(/\s+/g, " ").trim();
+  return topic.length > 90 ? `${topic.slice(0, 90)}...` : topic;
+}
+
+function buildContextualFollowUp(
+  session: InterviewSession,
+  followUpIndex: number,
+  lastAnswer: string
+): string {
+  const topic = extractAnswerTopic(lastAnswer);
+  const bank = followUpBankForSession(session);
+  const prompt = bank[followUpIndex % bank.length] || FOLLOW_UP_BANKS.default[0];
+
+  if (session.personality === "direct_time_conscious") {
+    return `Keep it tight. On "${topic}", ${prompt}`;
+  }
+
+  if (session.personality === "skeptical_senior_leader") {
+    return `Let me challenge that. On "${topic}", ${prompt}`;
+  }
+
+  return `On "${topic}", ${prompt}`;
 }
 
 function pickQuestion(index: number, session: InterviewSession): string {
@@ -88,15 +185,34 @@ function pickQuestion(index: number, session: InterviewSession): string {
   return bank[index % bank.length];
 }
 
-function pickFollowUp(index: number, session: InterviewSession): string {
-  const bank = followUpBankForSession(session);
-  return bank[index % bank.length];
-}
+function shouldWrapNow(
+  session: InterviewSession,
+  assistantMessages: InterviewMessage[],
+  lastAnswer: string
+): boolean {
+  const coreAsked = countCoreQuestionsAsked(assistantMessages);
+  const followUpsForCurrent = countFollowUpsForCurrentQuestion(assistantMessages);
+  const followUpBudget = computeFollowUpBudget(session, assistantMessages, lastAnswer);
 
-function isQuestionLimitReached(session: InterviewSession, candidateAnswerCount: number): boolean {
-  if (session.mode !== "question_count") return false;
-  const target = session.targetQuestionCount ?? 5;
-  return candidateAnswerCount >= target;
+  if (session.mode === "question_count") {
+    const target = session.targetQuestionCount ?? 5;
+    return coreAsked >= target && followUpsForCurrent >= followUpBudget;
+  }
+
+  const remaining = remainingTimeSeconds(session);
+  const timeIsUp = remaining <= 30;
+  const maxCoreQuestions = Math.min(
+    questionBankForSession(session).length,
+    Math.max(3, Math.floor((session.targetDurationMinutes ?? 45) / 7))
+  );
+
+  const exhaustedQuestionSet = coreAsked >= maxCoreQuestions;
+
+  if (timeIsUp) {
+    return followUpsForCurrent >= Math.min(1, followUpBudget) || coreAsked >= 1;
+  }
+
+  return exhaustedQuestionSet && followUpsForCurrent >= followUpBudget;
 }
 
 export function nextAssistantTurn(
@@ -130,25 +246,27 @@ export function nextAssistantTurn(
     };
   }
 
-  if (isQuestionLimitReached(session, candidateMessages.length)) {
+  const lastCandidate = candidateMessages[candidateMessages.length - 1]?.content ?? "";
+
+  if (shouldWrapNow(session, assistantMessages, lastCandidate)) {
     return {
       kind: "wrap_up",
       content:
-        "Great work. That wraps the interview portion. Next, I'll generate a scorecard with your strongest areas and the top fix to focus on.",
+        "Great work. That wraps the interview portion. Next, I'll generate a scorecard with strengths, gaps, frameworks, focus areas, and practice guidance.",
     };
   }
 
-  const lastCandidate = candidateMessages[candidateMessages.length - 1]?.content ?? "";
-
-  if (shouldAskFollowUp(lastCandidate, assistantMessages)) {
+  if (shouldAskFollowUp(session, lastCandidate, assistantMessages)) {
+    const followUpCount = countFollowUpsForCurrentQuestion(assistantMessages);
     return {
       kind: "follow_up",
-      content: pickFollowUp(candidateMessages.length - 1, session),
+      content: buildContextualFollowUp(session, followUpCount, lastCandidate),
     };
   }
 
+  const coreAsked = countCoreQuestionsAsked(assistantMessages);
   return {
     kind: "question",
-    content: pickQuestion(candidateMessages.length, session),
+    content: pickQuestion(coreAsked, session),
   };
 }

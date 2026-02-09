@@ -42,6 +42,7 @@ export async function POST(request: Request) {
     const customQuestions = String(body?.customQuestions ?? "").trim();
     const personality = body?.personality;
     const mode = body?.mode;
+    const useTimeBudget = body?.useTimeBudget !== undefined ? Boolean(body.useTimeBudget) : true;
 
     if (!targetCompany || !roleTitle || !jobDescription || !isInterviewMode(mode)) {
       return NextResponse.json(
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
       jobDescription,
       customQuestions: customQuestions || undefined,
       personality: personality || undefined,
+      useTimeBudget,
       mode,
       targetDurationMinutes,
       targetQuestionCount,

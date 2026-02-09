@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS interview_sessions (
   jobDescription TEXT NOT NULL,
   customQuestions TEXT,
   personality TEXT,
+  useTimeBudget INTEGER,
   mode TEXT NOT NULL,
   targetDurationMinutes INTEGER,
   targetQuestionCount INTEGER,
@@ -108,6 +109,7 @@ const ensureInterviewSessionColumn = (name: string, ddl: string) => {
 
 ensureInterviewSessionColumn("customQuestions", "TEXT");
 ensureInterviewSessionColumn("personality", "TEXT");
+ensureInterviewSessionColumn("useTimeBudget", "INTEGER");
 
 const serializeJson = (value: unknown): string | null => {
   if (value === undefined) return null;
@@ -157,6 +159,10 @@ const mapRowToInterviewSession = (
   personality: row.personality
     ? (String(row.personality) as InterviewPersonality)
     : undefined,
+  useTimeBudget:
+    row.useTimeBudget === null || row.useTimeBudget === undefined
+      ? true
+      : Boolean(Number(row.useTimeBudget)),
   mode: String(row.mode) as InterviewSession["mode"],
   targetDurationMinutes:
     row.targetDurationMinutes !== null && row.targetDurationMinutes !== undefined
@@ -328,6 +334,7 @@ export const createInterviewSession = (
     jobDescription: input.jobDescription.trim(),
     customQuestions: input.customQuestions?.trim() || undefined,
     personality: input.personality,
+    useTimeBudget: input.useTimeBudget ?? true,
     mode: input.mode,
     targetDurationMinutes: input.targetDurationMinutes,
     targetQuestionCount: input.targetQuestionCount,
@@ -337,11 +344,11 @@ export const createInterviewSession = (
 
   db.prepare(
     `INSERT INTO interview_sessions (
-      id, status, phase, targetCompany, roleTitle, roleLevel, jobDescription, customQuestions, personality,
+      id, status, phase, targetCompany, roleTitle, roleLevel, jobDescription, customQuestions, personality, useTimeBudget,
       mode, targetDurationMinutes, targetQuestionCount, startedAt, endedAt,
       createdAt, updatedAt
     ) VALUES (
-      @id, @status, @phase, @targetCompany, @roleTitle, @roleLevel, @jobDescription, @customQuestions, @personality,
+      @id, @status, @phase, @targetCompany, @roleTitle, @roleLevel, @jobDescription, @customQuestions, @personality, @useTimeBudget,
       @mode, @targetDurationMinutes, @targetQuestionCount, @startedAt, @endedAt,
       @createdAt, @updatedAt
     )`
@@ -382,6 +389,7 @@ export const updateInterviewSession = (
       | "targetQuestionCount"
       | "customQuestions"
       | "personality"
+      | "useTimeBudget"
     >
   >
 ): InterviewSession | null => {
@@ -402,6 +410,7 @@ export const updateInterviewSession = (
          targetQuestionCount = @targetQuestionCount,
          customQuestions = @customQuestions,
          personality = @personality,
+         useTimeBudget = @useTimeBudget,
          startedAt = @startedAt,
          endedAt = @endedAt,
          updatedAt = @updatedAt
@@ -412,6 +421,7 @@ export const updateInterviewSession = (
     endedAt: merged.endedAt ?? null,
     customQuestions: merged.customQuestions ?? null,
     personality: merged.personality ?? null,
+    useTimeBudget: merged.useTimeBudget === undefined ? null : (merged.useTimeBudget ? 1 : 0),
   });
 
   return merged;
