@@ -15,13 +15,12 @@ const allowedPlatforms = [
 ] as const;
 
 type Platform = (typeof allowedPlatforms)[number];
+type LaunchRouteContext = { params: Promise<{ platform: string }> };
 
-export async function POST(
-  request: Request,
-  { params }: { params: { platform: string } }
-) {
+export async function POST(request: Request, context: LaunchRouteContext) {
   try {
-    const platformParam = params.platform?.toLowerCase();
+    const { platform: rawPlatform } = await context.params;
+    const platformParam = rawPlatform?.toLowerCase();
     const isSupported = allowedPlatforms.includes(platformParam as Platform);
 
     if (!isSupported) {
