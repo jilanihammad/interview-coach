@@ -10,6 +10,8 @@ import {
   stopSpeaking,
 } from "@/lib/interview/browser-voice";
 
+type VoiceProvider = "browser" | "server";
+
 type Session = {
   id: string;
   status: string;
@@ -30,6 +32,27 @@ type Message = {
   createdAt: string;
 };
 
+type VoiceCapabilities = {
+  sttServerAvailable: boolean;
+  ttsServerAvailable: boolean;
+  serverVoiceAvailable: boolean;
+};
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export default function SessionClient({ sessionId }: { sessionId: string }) {
   const router = useRouter();
 
@@ -37,15 +60,28 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [candidateAnswer, setCandidateAnswer] = useState("");
 
   const [speechSupported, setSpeechSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState("");
   const [autoSpeak, setAutoSpeak] = useState(true);
 
+  const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>("browser");
+  const [voiceCapabilities, setVoiceCapabilities] = useState<VoiceCapabilities>({
+    sttServerAvailable: false,
+    ttsServerAvailable: false,
+    serverVoiceAvailable: false,
+  });
+
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const timerLabel = useMemo(() => {
     if (!session) return "";
@@ -80,6 +116,14 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fallbackToBrowserVoice = (message: string) => {
+    setVoiceProvider("browser");
+    if (typeof window !== "undefined") {
+      localStorage.setItem("interview_voice_provider", "browser");
+    }
+    setNotice(message);
   };
 
   useEffect(() => {
@@ -130,6 +174,78 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
     };
   }, []);
 
+  useEffect(() => {
+    const loadVoiceCapabilities = async () => {
+      try {
+        const response = await fetch("/api/interview/voice");
+        const data = (await response.json()) as VoiceCapabilities;
+        if (!response.ok) return;
+
+        setVoiceCapabilities(data);
+
+        const saved =
+          typeof window !== "undefined"
+            ? (localStorage.getItem("interview_voice_provider") as VoiceProvider | null)
+            : null;
+
+        if (saved === "server" && data.serverVoiceAvailable) {
+          setVoiceProvider("server");
+        }
+      } catch {
+        // Keep defaults and browser fallback.
+      }
+    };
+
+    void loadVoiceCapabilities();
+  }, []);
+
+  useEffect(() => {
+    if (voiceProvider === "server" && !voiceCapabilities.serverVoiceAvailable) {
+      fallbackToBrowserVoice("Server voice is unavailable. Switched to browser voice.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceCapabilities.serverVoiceAvailable]);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+      mediaRecorderRef.current?.stop();
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      audioRef.current?.pause();
+      stopSpeaking();
+    };
+  }, []);
+
+  const playServerTts = async (text: string) => {
+    const response = await fetchWithTimeout(
+      `/api/interview/sessions/${sessionId}/tts`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      },
+      15000
+    );
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload?.error || "Unable to generate TTS audio");
+    }
+
+    const blob = await response.blob();
+    const audioUrl = URL.createObjectURL(blob);
+
+    audioRef.current?.pause();
+    const audio = new Audio(audioUrl);
+    audioRef.current = audio;
+
+    try {
+      await audio.play();
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(audioUrl), 60000);
+    }
+  };
+
   const runAssistantTurn = async (payload?: { candidateAnswer?: string }) => {
     const response = await fetch(`/api/interview/sessions/${sessionId}/assistant-turn`, {
       method: "POST",
@@ -143,13 +259,23 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
     await loadSession();
 
     if (autoSpeak && data?.assistantMessage?.content) {
-      speakText(data.assistantMessage.content, { rate: 1, pitch: 1 });
+      if (voiceProvider === "server" && voiceCapabilities.ttsServerAvailable) {
+        try {
+          await playServerTts(data.assistantMessage.content);
+        } catch {
+          fallbackToBrowserVoice("Server TTS failed. Switched to browser voice output.");
+          speakText(data.assistantMessage.content, { rate: 1, pitch: 1 });
+        }
+      } else {
+        speakText(data.assistantMessage.content, { rate: 1, pitch: 1 });
+      }
     }
   };
 
   const handleStartSession = async () => {
     try {
       setSending(true);
+      setError(null);
       await runAssistantTurn();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to start session");
@@ -164,6 +290,7 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
 
     try {
       setSending(true);
+      setError(null);
       const answer = candidateAnswer.trim();
       setCandidateAnswer("");
       setInterimTranscript("");
@@ -199,7 +326,97 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
     }
   };
 
+  const transcribeServerAudio = async (audioBlob: Blob) => {
+    try {
+      setIsTranscribing(true);
+      setError(null);
+
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "candidate-answer.webm");
+
+      const response = await fetchWithTimeout(
+        `/api/interview/sessions/${sessionId}/stt`,
+        {
+          method: "POST",
+          body: formData,
+        },
+        10000
+      );
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || "Unable to transcribe audio");
+      }
+
+      if (data?.transcript) {
+        setCandidateAnswer((prev) => `${prev} ${String(data.transcript)}`.trim());
+      }
+    } catch {
+      fallbackToBrowserVoice("Server STT failed. Switched to browser microphone mode.");
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const startServerRecording = async () => {
+    if (!voiceCapabilities.sttServerAvailable) {
+      fallbackToBrowserVoice("Server STT is unavailable. Switched to browser microphone mode.");
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      fallbackToBrowserVoice("Microphone capture API unavailable. Switched to browser mode.");
+      return;
+    }
+
+    try {
+      setError(null);
+      setInterimTranscript("");
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      recordedChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordedChunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = () => {
+        setIsListening(false);
+
+        const audioBlob = new Blob(recordedChunksRef.current, { type: "audio/webm" });
+        recordedChunksRef.current = [];
+
+        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+
+        if (audioBlob.size > 0) {
+          void transcribeServerAudio(audioBlob);
+        }
+      };
+
+      recorder.start();
+      setIsListening(true);
+    } catch {
+      fallbackToBrowserVoice("Could not access microphone for server STT. Using browser mode.");
+    }
+  };
+
+  const stopServerRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
   const handleStartListening = () => {
+    if (voiceProvider === "server") {
+      void startServerRecording();
+      return;
+    }
+
     if (!recognitionRef.current) return;
     setInterimTranscript("");
     recognitionRef.current.start();
@@ -207,9 +424,32 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
   };
 
   const handleStopListening = () => {
+    if (voiceProvider === "server") {
+      stopServerRecording();
+      return;
+    }
+
     if (!recognitionRef.current) return;
     recognitionRef.current.stop();
     setIsListening(false);
+  };
+
+  const handleStopVoicePlayback = () => {
+    audioRef.current?.pause();
+    stopSpeaking();
+  };
+
+  const handleVoiceProviderChange = (next: VoiceProvider) => {
+    if (next === "server" && !voiceCapabilities.serverVoiceAvailable) {
+      fallbackToBrowserVoice("Server voice is not configured. Staying on browser voice.");
+      return;
+    }
+
+    setVoiceProvider(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("interview_voice_provider", next);
+    }
+    setNotice(next === "server" ? "Using server voice mode." : "Using browser voice mode.");
   };
 
   if (loading) {
@@ -255,7 +495,7 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
             </button>
             <button
               type="button"
-              onClick={stopSpeaking}
+              onClick={handleStopVoicePlayback}
               className="rounded border border-slate-700 px-3 py-2 text-xs text-white"
             >
               Stop voice
@@ -274,6 +514,12 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
         {error ? (
           <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
             {error}
+          </div>
+        ) : null}
+
+        {notice ? (
+          <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+            {notice}
           </div>
         ) : null}
 
@@ -314,6 +560,10 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
               <p className="text-xs text-slate-400">Listening: {interimTranscript}</p>
             ) : null}
 
+            {isTranscribing ? (
+              <p className="text-xs text-blue-300">Transcribing audio...</p>
+            ) : null}
+
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -324,7 +574,7 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
                   Send answer
                 </button>
 
-                {speechSupported ? (
+                {speechSupported || voiceCapabilities.sttServerAvailable ? (
                   isListening ? (
                     <button
                       type="button"
@@ -343,20 +593,39 @@ export default function SessionClient({ sessionId }: { sessionId: string }) {
                     </button>
                   )
                 ) : (
-                  <span className="text-xs text-slate-500">
-                    Browser speech recognition not supported here.
-                  </span>
+                  <span className="text-xs text-slate-500">Mic capture not supported here.</span>
                 )}
               </div>
 
-              <label className="inline-flex items-center gap-2 text-xs text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={autoSpeak}
-                  onChange={(e) => setAutoSpeak(e.target.checked)}
-                />
-                Auto-speak interviewer
-              </label>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
+                <label className="inline-flex items-center gap-2">
+                  <span>Voice</span>
+                  <select
+                    value={voiceProvider}
+                    onChange={(e) =>
+                      handleVoiceProviderChange(e.target.value as VoiceProvider)
+                    }
+                    className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs"
+                  >
+                    <option value="browser">Browser</option>
+                    <option
+                      value="server"
+                      disabled={!voiceCapabilities.serverVoiceAvailable}
+                    >
+                      Server
+                    </option>
+                  </select>
+                </label>
+
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={autoSpeak}
+                    onChange={(e) => setAutoSpeak(e.target.checked)}
+                  />
+                  Auto-speak interviewer
+                </label>
+              </div>
             </div>
           </form>
         </div>
