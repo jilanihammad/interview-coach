@@ -5,6 +5,8 @@ const addInterviewMessage = vi.fn();
 const listInterviewMessages = vi.fn();
 const updateInterviewSession = vi.fn();
 const nextAssistantTurn = vi.fn();
+const isInterviewLlmConfigured = vi.fn();
+const generateInterviewerTurnWithLlm = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   getInterviewSessionById,
@@ -15,6 +17,11 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/interview/engine", () => ({
   nextAssistantTurn,
+}));
+
+vi.mock("@/lib/interview/llm", () => ({
+  isInterviewLlmConfigured,
+  generateInterviewerTurnWithLlm,
 }));
 
 const { POST } = await import("@/app/api/interview/sessions/[id]/assistant-turn/route");
@@ -34,6 +41,10 @@ describe("assistant-turn route", () => {
     listInterviewMessages.mockReset();
     updateInterviewSession.mockReset();
     nextAssistantTurn.mockReset();
+    isInterviewLlmConfigured.mockReset();
+    generateInterviewerTurnWithLlm.mockReset();
+
+    isInterviewLlmConfigured.mockReturnValue(false);
 
     getInterviewSessionById.mockReturnValue(baseSession);
     listInterviewMessages.mockReturnValue([]);
@@ -118,5 +129,26 @@ describe("assistant-turn route", () => {
       "s1",
       expect.objectContaining({ status: "completed", phase: "scoring" })
     );
+  });
+
+  it("uses LLM turn text when provider is configured", async () => {
+    isInterviewLlmConfigured.mockReturnValue(true);
+    nextAssistantTurn.mockReturnValue({ kind: "follow_up", content: "fallback question" });
+    generateInterviewerTurnWithLlm.mockResolvedValue({
+      content: "llm follow-up",
+      meta: { provider: "openai", model: "gpt-4.1-mini", fallbackUsed: false },
+    });
+
+    const response = await POST(
+      new Request("http://localhost", {
+        method: "POST",
+        body: JSON.stringify({ candidateAnswer: "answer" }),
+      }),
+      { params: Promise.resolve({ id: "s1" }) }
+    );
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.turn.content).toBe("llm follow-up");
   });
 });

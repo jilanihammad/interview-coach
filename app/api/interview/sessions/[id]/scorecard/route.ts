@@ -10,6 +10,10 @@ import {
   InterviewScore,
   InterviewScoreDimension,
 } from "@/lib/interview/types";
+import {
+  generateEvaluatorScorecardWithLlm,
+  isInterviewLlmConfigured,
+} from "@/lib/interview/llm";
 
 type SessionRouteContext = { params: Promise<{ id: string }> };
 
@@ -173,6 +177,55 @@ function deriveSummary(
   };
 }
 
+function summaryFromLlmOrFallback(
+  llmSummary: {
+    strengths: string[];
+    gaps: string[];
+    frameworkSuggestions: InterviewFeedbackSummary["frameworkSuggestions"];
+    focusAreas: InterviewFeedbackSummary["focusAreas"];
+  },
+  candidateAnswers: string[],
+  avgResponseTimeSec: number,
+  avgWordCountValue: number
+): InterviewFeedbackSummary {
+  const strengths = llmSummary.strengths.slice(0, 3);
+  const gaps = llmSummary.gaps.slice(0, 3);
+
+  const frameworkSuggestions =
+    llmSummary.frameworkSuggestions.length > 0
+      ? llmSummary.frameworkSuggestions.slice(0, 3)
+      : [
+          {
+            name: "STAR",
+            description: "Use clear Situation, Task, Action, Result sequencing for every story.",
+            template: "Situation → Task → Action → Result (with one metric).",
+          },
+        ];
+
+  const focusAreas =
+    llmSummary.focusAreas.length > 0
+      ? llmSummary.focusAreas.slice(0, 3)
+      : [
+          {
+            area: "Improve answer specificity",
+            reason: "Use more concrete details and measurable outcomes.",
+            practice: "Rehearse each story with at least one metric and a concise result sentence.",
+          },
+        ];
+
+  return {
+    strengths,
+    gaps,
+    frameworkSuggestions,
+    focusAreas,
+    stats: {
+      avgResponseTimeSec: Number(avgResponseTimeSec.toFixed(1)),
+      avgWordCount: Number(avgWordCountValue.toFixed(1)),
+      totalResponses: candidateAnswers.length,
+    },
+  };
+}
+
 export async function POST(_request: Request, context: SessionRouteContext) {
   const { id } = await context.params;
 
@@ -226,21 +279,64 @@ export async function POST(_request: Request, context: SessionRouteContext) {
 
     let savedScores = bundle.scores;
     let generated = false;
+    let summary: InterviewFeedbackSummary;
+    let scoringMeta: { provider: string; model: string; fallbackUsed: boolean } | null = null;
 
     if (savedScores.length === 0) {
-      const scoresToSave = computeScores(candidateAnswers);
-      savedScores = scoresToSave.map((item) =>
-        addInterviewScore(id, item.dimension, item.score, item.rationale, item.recommendedFix)
-      );
-      generated = true;
-    }
+      if (isInterviewLlmConfigured()) {
+        try {
+          const llmScorecard = await generateEvaluatorScorecardWithLlm({
+            session: bundle.session,
+            messages: bundle.messages,
+          });
 
-    const summary = deriveSummary(
-      savedScores,
-      candidateAnswers,
-      avgResponseTimeSec,
-      avgWordCountValue
-    );
+          savedScores = llmScorecard.scores.map((item) =>
+            addInterviewScore(id, item.dimension, item.score, item.rationale, item.recommendedFix)
+          );
+
+          summary = summaryFromLlmOrFallback(
+            llmScorecard.summary,
+            candidateAnswers,
+            avgResponseTimeSec,
+            avgWordCountValue
+          );
+          scoringMeta = llmScorecard.meta;
+          generated = true;
+        } catch (error) {
+          console.warn("LLM evaluator failed, using deterministic score fallback", error);
+          const scoresToSave = computeScores(candidateAnswers);
+          savedScores = scoresToSave.map((item) =>
+            addInterviewScore(id, item.dimension, item.score, item.rationale, item.recommendedFix)
+          );
+          summary = deriveSummary(
+            savedScores,
+            candidateAnswers,
+            avgResponseTimeSec,
+            avgWordCountValue
+          );
+          generated = true;
+        }
+      } else {
+        const scoresToSave = computeScores(candidateAnswers);
+        savedScores = scoresToSave.map((item) =>
+          addInterviewScore(id, item.dimension, item.score, item.rationale, item.recommendedFix)
+        );
+        summary = deriveSummary(
+          savedScores,
+          candidateAnswers,
+          avgResponseTimeSec,
+          avgWordCountValue
+        );
+        generated = true;
+      }
+    } else {
+      summary = deriveSummary(
+        savedScores,
+        candidateAnswers,
+        avgResponseTimeSec,
+        avgWordCountValue
+      );
+    }
 
     updateInterviewSession(id, {
       phase: "done",
@@ -257,6 +353,7 @@ export async function POST(_request: Request, context: SessionRouteContext) {
       scores: savedScores,
       generated,
       summary,
+      llm: scoringMeta,
     });
   } catch (error) {
     console.error("Error generating scorecard", error);

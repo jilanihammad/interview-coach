@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getInterviewSessionById } from "@/lib/db";
-import { synthesizeSpeechWithElevenLabs } from "@/lib/interview/server-voice";
+import { synthesizeSpeech } from "@/lib/interview/server-voice";
 
 type SessionRouteContext = { params: Promise<{ id: string }> };
 
@@ -23,7 +23,7 @@ export async function POST(request: Request, context: SessionRouteContext) {
       return NextResponse.json({ error: "text is required" }, { status: 400 });
     }
 
-    const audioBuffer = await synthesizeSpeechWithElevenLabs(text);
+    const audioBuffer = await synthesizeSpeech(text);
 
     return new Response(new Uint8Array(audioBuffer), {
       status: 200,
@@ -36,7 +36,7 @@ export async function POST(request: Request, context: SessionRouteContext) {
     console.error("Error generating interview audio", error);
     const message = error instanceof Error ? error.message : "Unable to generate audio";
 
-    if (message.includes("not configured")) {
+    if (message.includes("not configured") || message.includes("No TTS provider configured")) {
       return NextResponse.json({ error: message }, { status: 503 });
     }
 

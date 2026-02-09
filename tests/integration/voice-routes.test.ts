@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getInterviewSessionById = vi.fn();
 const transcribeAudioWithDeepgram = vi.fn();
-const synthesizeSpeechWithElevenLabs = vi.fn();
+const synthesizeSpeech = vi.fn();
 const getVoiceCapabilities = vi.fn();
 
 vi.mock("@/lib/db", () => ({
@@ -11,7 +11,7 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/interview/server-voice", () => ({
   transcribeAudioWithDeepgram,
-  synthesizeSpeechWithElevenLabs,
+  synthesizeSpeech,
   getVoiceCapabilities,
 }));
 
@@ -23,7 +23,7 @@ describe("voice routes", () => {
   beforeEach(() => {
     getInterviewSessionById.mockReset();
     transcribeAudioWithDeepgram.mockReset();
-    synthesizeSpeechWithElevenLabs.mockReset();
+    synthesizeSpeech.mockReset();
     getVoiceCapabilities.mockReset();
 
     getInterviewSessionById.mockReturnValue({ id: "s1" });
@@ -34,6 +34,8 @@ describe("voice routes", () => {
       sttServerAvailable: true,
       ttsServerAvailable: false,
       serverVoiceAvailable: false,
+      activeTtsProvider: null,
+      availableTtsProviders: [],
     });
 
     const res = await voiceRoute.GET();
@@ -91,7 +93,7 @@ describe("voice routes", () => {
   });
 
   it("tts returns audio/mpeg on success", async () => {
-    synthesizeSpeechWithElevenLabs.mockResolvedValue(Buffer.from([1, 2, 3]));
+    synthesizeSpeech.mockResolvedValue(Buffer.from([1, 2, 3]));
 
     const res = await ttsRoute.POST(
       new Request("http://localhost", {
@@ -106,7 +108,7 @@ describe("voice routes", () => {
   });
 
   it("tts maps not-configured errors to 503", async () => {
-    synthesizeSpeechWithElevenLabs.mockRejectedValue(new Error("ELEVENLABS_API_KEY is not configured"));
+    synthesizeSpeech.mockRejectedValue(new Error("No TTS provider configured"));
 
     const res = await ttsRoute.POST(
       new Request("http://localhost", {
