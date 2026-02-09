@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
 
 import { createInterviewSession, listInterviewSessions } from "@/lib/db";
-import { InterviewMode } from "@/lib/interview/types";
+import {
+  InterviewMode,
+  InterviewPersonality,
+  interviewPersonalityOptions,
+} from "@/lib/interview/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function isInterviewMode(value: unknown): value is InterviewMode {
   return value === "time" || value === "question_count";
+}
+
+function isInterviewPersonality(value: unknown): value is InterviewPersonality {
+  return interviewPersonalityOptions.some((option) => option.value === value);
 }
 
 export async function GET() {
@@ -31,6 +39,8 @@ export async function POST(request: Request) {
     const roleTitle = String(body?.roleTitle ?? "").trim();
     const roleLevel = String(body?.roleLevel ?? "").trim();
     const jobDescription = String(body?.jobDescription ?? "").trim();
+    const customQuestions = String(body?.customQuestions ?? "").trim();
+    const personality = body?.personality;
     const mode = body?.mode;
 
     if (!targetCompany || !roleTitle || !jobDescription || !isInterviewMode(mode)) {
@@ -38,6 +48,17 @@ export async function POST(request: Request) {
         {
           error:
             "targetCompany, roleTitle, jobDescription, and mode (time|question_count) are required",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (personality && !isInterviewPersonality(personality)) {
+      return NextResponse.json(
+        {
+          error: `Invalid personality. Allowed: ${interviewPersonalityOptions
+            .map((option) => option.value)
+            .join(", ")}`,
         },
         { status: 400 }
       );
@@ -58,6 +79,8 @@ export async function POST(request: Request) {
       roleTitle,
       roleLevel: roleLevel || undefined,
       jobDescription,
+      customQuestions: customQuestions || undefined,
+      personality: personality || undefined,
       mode,
       targetDurationMinutes,
       targetQuestionCount,

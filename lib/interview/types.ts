@@ -1,5 +1,21 @@
 export type InterviewMode = "time" | "question_count";
 
+export type InterviewPersonality =
+  | "friendly_probing"
+  | "direct_time_conscious"
+  | "skeptical_senior_leader"
+  | "warm_supportive";
+
+export const interviewPersonalityOptions: Array<{
+  value: InterviewPersonality;
+  label: string;
+}> = [
+  { value: "friendly_probing", label: "Friendly but probing" },
+  { value: "direct_time_conscious", label: "Direct and time-conscious" },
+  { value: "skeptical_senior_leader", label: "Skeptical senior leader" },
+  { value: "warm_supportive", label: "Warm and supportive" },
+];
+
 export type InterviewPhase =
   | "setup"
   | "intro"
@@ -32,6 +48,8 @@ export type InterviewSession = {
   roleTitle: string;
   roleLevel?: string;
   jobDescription: string;
+  customQuestions?: string;
+  personality?: InterviewPersonality;
   mode: InterviewMode;
   targetDurationMinutes?: number;
   targetQuestionCount?: number;
@@ -66,6 +84,8 @@ export type CreateInterviewSessionInput = {
   roleTitle: string;
   roleLevel?: string;
   jobDescription: string;
+  customQuestions?: string;
+  personality?: InterviewPersonality;
   mode: InterviewMode;
   targetDurationMinutes?: number;
   targetQuestionCount?: number;

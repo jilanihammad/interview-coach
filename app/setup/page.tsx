@@ -3,6 +3,11 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import {
+  InterviewPersonality,
+  interviewPersonalityOptions,
+} from "@/lib/interview/types";
+
 export default function SetupPage() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
@@ -12,6 +17,8 @@ export default function SetupPage() {
   const [roleTitle, setRoleTitle] = useState("Software Engineer");
   const [roleLevel, setRoleLevel] = useState("L4");
   const [jobDescription, setJobDescription] = useState("");
+  const [customQuestions, setCustomQuestions] = useState("");
+  const [personality, setPersonality] = useState<InterviewPersonality | "">("");
   const [mode, setMode] = useState<"time" | "question_count">("time");
   const [targetDurationMinutes, setTargetDurationMinutes] = useState(45);
   const [targetQuestionCount, setTargetQuestionCount] = useState(5);
@@ -30,6 +37,8 @@ export default function SetupPage() {
           roleTitle,
           roleLevel,
           jobDescription,
+          customQuestions,
+          personality: personality || undefined,
           mode,
           targetDurationMinutes: mode === "time" ? targetDurationMinutes : undefined,
           targetQuestionCount:
@@ -57,7 +66,7 @@ export default function SetupPage() {
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Interview Copilot</p>
           <h1 className="text-3xl font-semibold">Setup interview session</h1>
           <p className="mt-2 text-sm text-slate-400">
-            Paste a role brief, choose session format, and start a realistic mock interview.
+            Paste a role brief, add optional custom questions and interviewer style, then start.
           </p>
         </div>
 
@@ -112,6 +121,36 @@ export default function SetupPage() {
               className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
               placeholder="Paste JD text here..."
             />
+          </label>
+
+          <label className="space-y-1 text-sm">
+            <span className="text-slate-300">Custom interview questions (optional)</span>
+            <textarea
+              value={customQuestions}
+              onChange={(e) => setCustomQuestions(e.target.value)}
+              rows={5}
+              className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
+              placeholder="One question per line (optional)"
+            />
+            <span className="block text-xs text-slate-500">
+              If provided, these are prioritized over the default question bank.
+            </span>
+          </label>
+
+          <label className="space-y-1 text-sm">
+            <span className="text-slate-300">Interviewer personality (optional)</span>
+            <select
+              value={personality}
+              onChange={(e) => setPersonality((e.target.value as InterviewPersonality) || "")}
+              className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
+            >
+              <option value="">Default</option>
+              {interviewPersonalityOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
 
           <div className="space-y-2 rounded border border-slate-800 bg-slate-950/40 p-3">

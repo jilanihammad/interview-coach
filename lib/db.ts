@@ -17,6 +17,7 @@ import {
   CreateInterviewSessionInput,
   InterviewMessage,
   InterviewMessageRole,
+  InterviewPersonality,
   InterviewPhase,
   InterviewScore,
   InterviewScoreDimension,
@@ -61,6 +62,8 @@ CREATE TABLE IF NOT EXISTS interview_sessions (
   roleTitle TEXT NOT NULL,
   roleLevel TEXT,
   jobDescription TEXT NOT NULL,
+  customQuestions TEXT,
+  personality TEXT,
   mode TEXT NOT NULL,
   targetDurationMinutes INTEGER,
   targetQuestionCount INTEGER,
@@ -92,6 +95,19 @@ CREATE TABLE IF NOT EXISTS interview_scores (
   FOREIGN KEY (sessionId) REFERENCES interview_sessions(id) ON DELETE CASCADE
 );
 `);
+
+const ensureInterviewSessionColumn = (name: string, ddl: string) => {
+  const cols = db.prepare("PRAGMA table_info(interview_sessions)").all() as Array<{
+    name: string;
+  }>;
+
+  if (!cols.some((col) => col.name === name)) {
+    db.prepare(`ALTER TABLE interview_sessions ADD COLUMN ${name} ${ddl}`).run();
+  }
+};
+
+ensureInterviewSessionColumn("customQuestions", "TEXT");
+ensureInterviewSessionColumn("personality", "TEXT");
 
 const serializeJson = (value: unknown): string | null => {
   if (value === undefined) return null;
@@ -137,6 +153,10 @@ const mapRowToInterviewSession = (
   roleTitle: String(row.roleTitle),
   roleLevel: row.roleLevel ? String(row.roleLevel) : undefined,
   jobDescription: String(row.jobDescription),
+  customQuestions: row.customQuestions ? String(row.customQuestions) : undefined,
+  personality: row.personality
+    ? (String(row.personality) as InterviewPersonality)
+    : undefined,
   mode: String(row.mode) as InterviewSession["mode"],
   targetDurationMinutes:
     row.targetDurationMinutes !== null && row.targetDurationMinutes !== undefined
@@ -306,6 +326,8 @@ export const createInterviewSession = (
     roleTitle: input.roleTitle.trim(),
     roleLevel: input.roleLevel?.trim() || undefined,
     jobDescription: input.jobDescription.trim(),
+    customQuestions: input.customQuestions?.trim() || undefined,
+    personality: input.personality,
     mode: input.mode,
     targetDurationMinutes: input.targetDurationMinutes,
     targetQuestionCount: input.targetQuestionCount,
@@ -315,11 +337,11 @@ export const createInterviewSession = (
 
   db.prepare(
     `INSERT INTO interview_sessions (
-      id, status, phase, targetCompany, roleTitle, roleLevel, jobDescription,
+      id, status, phase, targetCompany, roleTitle, roleLevel, jobDescription, customQuestions, personality,
       mode, targetDurationMinutes, targetQuestionCount, startedAt, endedAt,
       createdAt, updatedAt
     ) VALUES (
-      @id, @status, @phase, @targetCompany, @roleTitle, @roleLevel, @jobDescription,
+      @id, @status, @phase, @targetCompany, @roleTitle, @roleLevel, @jobDescription, @customQuestions, @personality,
       @mode, @targetDurationMinutes, @targetQuestionCount, @startedAt, @endedAt,
       @createdAt, @updatedAt
     )`
@@ -358,6 +380,8 @@ export const updateInterviewSession = (
       | "endedAt"
       | "targetDurationMinutes"
       | "targetQuestionCount"
+      | "customQuestions"
+      | "personality"
     >
   >
 ): InterviewSession | null => {
@@ -376,6 +400,8 @@ export const updateInterviewSession = (
          phase = @phase,
          targetDurationMinutes = @targetDurationMinutes,
          targetQuestionCount = @targetQuestionCount,
+         customQuestions = @customQuestions,
+         personality = @personality,
          startedAt = @startedAt,
          endedAt = @endedAt,
          updatedAt = @updatedAt
@@ -384,6 +410,8 @@ export const updateInterviewSession = (
     ...merged,
     startedAt: merged.startedAt ?? null,
     endedAt: merged.endedAt ?? null,
+    customQuestions: merged.customQuestions ?? null,
+    personality: merged.personality ?? null,
   });
 
   return merged;

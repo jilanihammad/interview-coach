@@ -1,12 +1,31 @@
+import { InterviewPersonality } from "./types";
+
 type InterviewPromptInput = {
   targetCompany: string;
   roleTitle: string;
   roleLevel?: string;
   jobDescription: string;
+  customQuestions?: string;
+  personality?: InterviewPersonality;
   mode: "time" | "question_count";
   targetDurationMinutes?: number;
   targetQuestionCount?: number;
 };
+
+function personalityGuidance(personality?: InterviewPersonality): string {
+  switch (personality) {
+    case "friendly_probing":
+      return "Tone: friendly and encouraging, but ask specific probing follow-ups when answers are vague.";
+    case "direct_time_conscious":
+      return "Tone: concise, direct, and time-conscious. Keep responses focused and avoid long detours.";
+    case "skeptical_senior_leader":
+      return "Tone: skeptical senior leader. Challenge assumptions and ask for evidence and measurable impact.";
+    case "warm_supportive":
+      return "Tone: warm and supportive. Keep pressure low while still getting concrete details.";
+    default:
+      return "Tone: professional and balanced.";
+  }
+}
 
 export function buildInterviewerSystemPrompt(input: InterviewPromptInput): string {
   const cadence =
@@ -17,6 +36,7 @@ export function buildInterviewerSystemPrompt(input: InterviewPromptInput): strin
   return [
     "You are a senior interviewer at a top-tier tech company.",
     "Run a realistic behavioral interview with concise, professional tone.",
+    personalityGuidance(input.personality),
     `Target company: ${input.targetCompany}.`,
     `Target role: ${input.roleTitle}${input.roleLevel ? ` (${input.roleLevel})` : ""}.`,
     cadence,
@@ -24,6 +44,9 @@ export function buildInterviewerSystemPrompt(input: InterviewPromptInput): strin
     "After each candidate answer, ask up to 2 probing follow-up questions.",
     "Avoid giving feedback mid-session.",
     "At the end, summarize interview strengths and transition to evaluator handoff.",
+    input.customQuestions?.trim()
+      ? `Prefer this user-supplied question bank when asking core questions:\n${input.customQuestions}`
+      : "No custom question bank provided; generate questions from the job description.",
     "Keep questions grounded in the job description below:",
     input.jobDescription,
   ].join("\n");
@@ -54,5 +77,16 @@ export function buildKickoffAssistantMessage(input: InterviewPromptInput): strin
       ? `We'll run a ${input.targetDurationMinutes ?? 45}-minute mock interview.`
       : `We'll run ${input.targetQuestionCount ?? 5} behavioral questions.`;
 
-  return `${opening} I'll ask one question at a time and use brief follow-ups when needed. Let's begin with your intro: tell me about yourself and why this role at ${input.targetCompany} is a fit.`;
+  const tone =
+    input.personality === "direct_time_conscious"
+      ? "I'll keep this tight and focused."
+      : input.personality === "friendly_probing"
+        ? "I'll keep this conversational and ask probing follow-ups."
+        : input.personality === "skeptical_senior_leader"
+          ? "I'll challenge assumptions and ask for concrete evidence."
+          : input.personality === "warm_supportive"
+            ? "I'll keep this supportive while still pushing for specifics."
+            : "I'll ask one question at a time and use brief follow-ups when needed.";
+
+  return `${opening} ${tone} Let's begin with your intro: tell me about yourself and why this role at ${input.targetCompany} is a fit.`;
 }
