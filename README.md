@@ -27,6 +27,8 @@ npm run dev
 
 Open `http://localhost:3000/setup`.
 
+Defaults are OpenAI-first for all provider-backed paths (LLM, STT, TTS). If OpenAI is unavailable, configured fallbacks are used.
+
 If provider API keys are missing, the app automatically falls back:
 - Voice: browser capture/speech synthesis mode
 - Interview turns + scorecard: deterministic engine/scoring

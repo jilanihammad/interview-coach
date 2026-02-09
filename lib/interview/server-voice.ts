@@ -82,8 +82,8 @@ function resolveSttProvider(): SttProvider | null {
   const available = getAvailableSttProviders();
 
   if (configured && available.includes(configured)) return configured;
-  if (available.includes("deepgram")) return "deepgram";
   if (available.includes("openai")) return "openai";
+  if (available.includes("deepgram")) return "deepgram";
   if (available.includes("whisper")) return "whisper";
   return null;
 }
@@ -93,8 +93,8 @@ function resolveTtsProvider(): TtsProvider | null {
   const available = getAvailableTtsProviders();
 
   if (configured && available.includes(configured)) return configured;
-  if (available.includes("elevenlabs")) return "elevenlabs";
   if (available.includes("openai")) return "openai";
+  if (available.includes("elevenlabs")) return "elevenlabs";
   return null;
 }
 
