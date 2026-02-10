@@ -54,6 +54,8 @@ export type InterviewSession = {
   mode: InterviewMode;
   targetDurationMinutes?: number;
   targetQuestionCount?: number;
+  consentAcceptedAt?: string;
+  consentVersion?: string;
   startedAt?: string;
   endedAt?: string;
   createdAt: string;
@@ -91,6 +93,8 @@ export type CreateInterviewSessionInput = {
   mode: InterviewMode;
   targetDurationMinutes?: number;
   targetQuestionCount?: number;
+  consentAcceptedAt: string;
+  consentVersion: string;
 };
 
 export type InterviewSessionBundle = {

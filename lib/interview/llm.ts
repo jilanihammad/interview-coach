@@ -22,6 +22,8 @@ type ProviderRunMeta = {
   provider: InterviewLlmProvider;
   model: string;
   fallbackUsed: boolean;
+  latencyMs: number;
+  attempts: number;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -323,6 +325,7 @@ async function runProviderChain(
 
   for (let i = 0; i < chain.length; i += 1) {
     const config = chain[i];
+    const startedAt = Date.now();
 
     try {
       const text = await callProvider(config, systemPrompt, userPrompt, temperature, maxTokens);
@@ -332,6 +335,8 @@ async function runProviderChain(
           provider: config.provider,
           model: config.model,
           fallbackUsed: i > 0,
+          latencyMs: Date.now() - startedAt,
+          attempts: i + 1,
         },
       };
     } catch (error) {

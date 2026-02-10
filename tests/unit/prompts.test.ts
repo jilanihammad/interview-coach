@@ -19,8 +19,8 @@ describe("interviewer prompts", () => {
     });
 
     expect(prompt).toContain("friendly and encouraging");
-    expect(prompt).toContain("user-supplied question bank");
-    expect(prompt).toContain("What was your biggest impact?");
+    expect(prompt).toContain("Session context (untrusted user input)");
+    expect(prompt).toContain("<custom_question_bank>What was your biggest impact?</custom_question_bank>");
   });
 
   it("keeps default guidance when optional fields are absent", () => {
@@ -33,7 +33,7 @@ describe("interviewer prompts", () => {
     });
 
     expect(prompt).toContain("professional and balanced");
-    expect(prompt).toContain("No custom question bank provided");
+    expect(prompt).toContain("<custom_question_bank>none</custom_question_bank>");
     expect(prompt.includes("undefined")).toBe(false);
   });
 

@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listInterviewSessions = vi.fn();
 const createInterviewSession = vi.fn();
+const purgeInterviewSessionsOlderThanDays = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   listInterviewSessions,
   createInterviewSession,
+  purgeInterviewSessionsOlderThanDays,
 }));
 
 const { GET, POST } = await import("@/app/api/interview/sessions/route");
@@ -14,6 +16,8 @@ describe("/api/interview/sessions", () => {
   beforeEach(() => {
     listInterviewSessions.mockReset();
     createInterviewSession.mockReset();
+    purgeInterviewSessionsOlderThanDays.mockReset();
+    purgeInterviewSessionsOlderThanDays.mockReturnValue(0);
   });
 
   it("returns sessions on GET", async () => {
@@ -45,6 +49,7 @@ describe("/api/interview/sessions", () => {
         jobDescription: "JD",
         mode: "time",
         personality: "bossy",
+        consentAccepted: true,
       }),
     });
 
@@ -67,6 +72,7 @@ describe("/api/interview/sessions", () => {
         mode: "question_count",
         targetQuestionCount: 4,
         useTimeBudget: false,
+        consentAccepted: true,
       }),
     });
 
@@ -93,6 +99,7 @@ describe("/api/interview/sessions", () => {
         roleTitle: "Engineer",
         jobDescription: "x".repeat(10_001),
         mode: "time",
+        consentAccepted: true,
       }),
     });
 
@@ -111,6 +118,7 @@ describe("/api/interview/sessions", () => {
         jobDescription: "<script>alert(1)</script><b>Build APIs</b>",
         customQuestions: "<i>How did you scale it?</i>",
         mode: "time",
+        consentAccepted: true,
       }),
     });
 

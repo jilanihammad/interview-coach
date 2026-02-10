@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { getInterviewSessionBundle, updateInterviewSession } from "@/lib/db";
+import {
+  deleteInterviewSession,
+  getInterviewSessionBundle,
+  updateInterviewSession,
+} from "@/lib/db";
+import { logInterviewEvent } from "@/lib/interview/observability";
 import { InterviewPhase, InterviewSessionStatus } from "@/lib/interview/types";
 
 export const runtime = "nodejs";
@@ -74,6 +79,27 @@ export async function PUT(request: Request, context: SessionRouteContext) {
     console.error("Error updating interview session", error);
     return NextResponse.json(
       { error: "Unable to update interview session" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(_request: Request, context: SessionRouteContext) {
+  try {
+    const { id } = await context.params;
+    const deleted = deleteInterviewSession(id);
+
+    if (!deleted) {
+      return NextResponse.json({ error: "Interview session not found" }, { status: 404 });
+    }
+
+    logInterviewEvent("info", "session_deleted", { sessionId: id });
+
+    return new Response(null, { status: 204 });
+  } catch (error) {
+    console.error("Error deleting interview session", error);
+    return NextResponse.json(
+      { error: "Unable to delete interview session" },
       { status: 500 }
     );
   }

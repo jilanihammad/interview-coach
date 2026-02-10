@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Score = {
   id: string;
@@ -56,10 +57,12 @@ const dimensionLabels: Record<Score["dimension"], string> = {
 };
 
 export default function FeedbackClient({ sessionId }: { sessionId: string }) {
+  const router = useRouter();
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const averageScore = useMemo(() => {
     if (!bundle?.scores.length) return null;
@@ -95,6 +98,35 @@ export default function FeedbackClient({ sessionId }: { sessionId: string }) {
     }
   };
 
+  const handleDeleteSession = async () => {
+    if (!sessionId) return;
+
+    const confirmed = window.confirm(
+      "Delete this session and all stored transcript/score data? This cannot be undone."
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeleting(true);
+      setError(null);
+
+      const response = await fetch(`/api/interview/sessions/${sessionId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error || "Unable to delete session");
+      }
+
+      router.push("/setup");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete session");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   useEffect(() => {
     if (!sessionId) {
       setError("Missing session id");
@@ -117,14 +149,24 @@ export default function FeedbackClient({ sessionId }: { sessionId: string }) {
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-10 text-slate-50">
       <div className="mx-auto max-w-4xl space-y-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Interview Feedback</p>
-          <h1 className="text-2xl font-semibold">
-            {bundle?.session.roleTitle} @ {bundle?.session.targetCompany}
-          </h1>
-          <p className="text-sm text-slate-400">
-            Strengths, gaps, frameworks, focus areas, and speaking metrics.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Interview Feedback</p>
+            <h1 className="text-2xl font-semibold">
+              {bundle?.session.roleTitle} @ {bundle?.session.targetCompany}
+            </h1>
+            <p className="text-sm text-slate-400">
+              Strengths, gaps, frameworks, focus areas, and speaking metrics.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleDeleteSession}
+            disabled={deleting}
+            className="rounded border border-red-500/50 px-3 py-2 text-xs text-red-200 disabled:opacity-50"
+          >
+            {deleting ? "Deleting..." : "Delete session data"}
+          </button>
         </div>
 
         {error ? (

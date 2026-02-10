@@ -8,6 +8,13 @@ import {
   interviewPersonalityOptions,
 } from "@/lib/interview/types";
 
+const MAX_COMPANY_CHARS = 120;
+const MAX_ROLE_CHARS = 120;
+const MAX_LEVEL_CHARS = 80;
+const MAX_JOB_DESCRIPTION_CHARS = 10_000;
+const MAX_CUSTOM_QUESTIONS_CHARS = 5_000;
+const CONSENT_VERSION = "v1";
+
 export default function SetupPage() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
@@ -22,9 +29,16 @@ export default function SetupPage() {
   const [mode, setMode] = useState<"time" | "question_count">("time");
   const [targetDurationMinutes, setTargetDurationMinutes] = useState(45);
   const [targetQuestionCount, setTargetQuestionCount] = useState(5);
+  const [consentAccepted, setConsentAccepted] = useState(false);
 
   const handleCreateSession = async (event: FormEvent) => {
     event.preventDefault();
+
+    if (!consentAccepted) {
+      setError("Please accept the privacy notice before starting.");
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
@@ -43,6 +57,8 @@ export default function SetupPage() {
           targetDurationMinutes: mode === "time" ? targetDurationMinutes : undefined,
           targetQuestionCount:
             mode === "question_count" ? targetQuestionCount : undefined,
+          consentAccepted,
+          consentVersion: CONSENT_VERSION,
         }),
       });
 
@@ -85,6 +101,7 @@ export default function SetupPage() {
               <span className="text-slate-300">Target company</span>
               <input
                 value={targetCompany}
+                maxLength={MAX_COMPANY_CHARS}
                 onChange={(e) => setTargetCompany(e.target.value)}
                 className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
                 placeholder="Google"
@@ -95,6 +112,7 @@ export default function SetupPage() {
               <span className="text-slate-300">Role</span>
               <input
                 value={roleTitle}
+                maxLength={MAX_ROLE_CHARS}
                 onChange={(e) => setRoleTitle(e.target.value)}
                 className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
                 placeholder="Software Engineer"
@@ -106,6 +124,7 @@ export default function SetupPage() {
             <span className="text-slate-300">Level (optional)</span>
             <input
               value={roleLevel}
+              maxLength={MAX_LEVEL_CHARS}
               onChange={(e) => setRoleLevel(e.target.value)}
               className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
               placeholder="L4 / IC5 / Staff"
@@ -116,22 +135,30 @@ export default function SetupPage() {
             <span className="text-slate-300">Job description</span>
             <textarea
               value={jobDescription}
+              maxLength={MAX_JOB_DESCRIPTION_CHARS}
               onChange={(e) => setJobDescription(e.target.value)}
               rows={8}
               className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
               placeholder="Paste JD text here..."
             />
+            <span className="block text-xs text-slate-500">
+              {jobDescription.length}/{MAX_JOB_DESCRIPTION_CHARS} characters
+            </span>
           </label>
 
           <label className="space-y-1 text-sm">
             <span className="text-slate-300">Custom interview questions (optional)</span>
             <textarea
               value={customQuestions}
+              maxLength={MAX_CUSTOM_QUESTIONS_CHARS}
               onChange={(e) => setCustomQuestions(e.target.value)}
               rows={5}
               className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
               placeholder="One question per line (optional)"
             />
+            <span className="block text-xs text-slate-500">
+              {customQuestions.length}/{MAX_CUSTOM_QUESTIONS_CHARS} characters
+            </span>
             <span className="block text-xs text-slate-500">
               If provided, these are prioritized over the default question bank.
             </span>
@@ -201,10 +228,25 @@ export default function SetupPage() {
             )}
           </div>
 
+          <div className="rounded border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300">
+            <label className="inline-flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={consentAccepted}
+                onChange={(e) => setConsentAccepted(e.target.checked)}
+                className="mt-1"
+              />
+              <span>
+                I understand audio, transcript text, and interview scores are stored to generate feedback.
+                I can delete this session later.
+              </span>
+            </label>
+          </div>
+
           <div className="flex items-center justify-between">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !consentAccepted}
               className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
               {saving ? "Creating..." : "Start interview"}

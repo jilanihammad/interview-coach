@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import {
   addInterviewMessage,
+  addInterviewProviderUsage,
   getInterviewSessionById,
   listInterviewMessages,
   updateInterviewSession,
@@ -11,6 +12,8 @@ import {
   generateInterviewerTurnWithLlm,
   isInterviewLlmConfigured,
 } from "@/lib/interview/llm";
+import { logInterviewEvent } from "@/lib/interview/observability";
+import { consumeRateLimit, getClientIp, readEnvInt } from "@/lib/interview/rate-limit";
 
 type SessionRouteContext = { params: Promise<{ id: string }> };
 
@@ -19,12 +22,36 @@ export const dynamic = "force-dynamic";
 
 const processingTurns = new Set<string>();
 
+const TURN_RATE_LIMIT = readEnvInt("INTERVIEW_RATE_TURNS", 40);
+const TURN_RATE_WINDOW_MS = readEnvInt("INTERVIEW_RATE_TURNS_WINDOW_MS", 60 * 1000);
+const MAX_CANDIDATE_TURNS = readEnvInt("INTERVIEW_MAX_CANDIDATE_TURNS", 25);
+const MAX_SESSION_DURATION_MINUTES = readEnvInt("INTERVIEW_MAX_SESSION_DURATION_MIN", 90);
+
 function isSessionLockedForTurns(status: string, phase: string): boolean {
   return status === "cancelled" || status === "completed" || phase === "scoring" || phase === "done";
 }
 
 export async function POST(request: Request, context: SessionRouteContext) {
   const { id } = await context.params;
+
+  const clientIp = getClientIp(request);
+  const rateLimit = consumeRateLimit(
+    `turn:${clientIp}:${id}`,
+    TURN_RATE_LIMIT,
+    TURN_RATE_WINDOW_MS
+  );
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many turn submissions. Please slow down." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimit.retryAfterSec),
+        },
+      }
+    );
+  }
 
   if (processingTurns.has(id)) {
     return NextResponse.json({ error: "Turn already in progress" }, { status: 409 });
@@ -52,6 +79,35 @@ export async function POST(request: Request, context: SessionRouteContext) {
       ? Math.max(0, responseDurationSecRaw)
       : undefined;
 
+    if (session.startedAt) {
+      const startedAtMs = Date.parse(session.startedAt);
+      if (Number.isFinite(startedAtMs)) {
+        const elapsedMin = (Date.now() - startedAtMs) / (60 * 1000);
+        if (elapsedMin > MAX_SESSION_DURATION_MINUTES) {
+          updateInterviewSession(id, {
+            status: "cancelled",
+            phase: "done",
+            endedAt: new Date().toISOString(),
+          });
+
+          return NextResponse.json(
+            { error: "Session expired due to max duration. Please start a new session." },
+            { status: 410 }
+          );
+        }
+      }
+    }
+
+    const messagesBeforeTurn = listInterviewMessages(id);
+    const candidateTurnCount = messagesBeforeTurn.filter((m) => m.role === "candidate").length;
+
+    if (candidateAnswer && candidateTurnCount >= MAX_CANDIDATE_TURNS) {
+      return NextResponse.json(
+        { error: "Session reached the maximum answer limit. Please end and score." },
+        { status: 410 }
+      );
+    }
+
     if (candidateAnswer) {
       const wordCount = candidateAnswer.split(/\s+/).filter(Boolean).length;
 
@@ -66,7 +122,15 @@ export async function POST(request: Request, context: SessionRouteContext) {
     const turn = nextAssistantTurn(session, messages);
 
     let assistantContent = turn.content;
-    let llmMeta: { provider: string; model: string; fallbackUsed: boolean } | null = null;
+    let llmMeta:
+      | {
+          provider: string;
+          model: string;
+          fallbackUsed: boolean;
+          latencyMs?: number;
+          attempts?: number;
+        }
+      | null = null;
 
     if (isInterviewLlmConfigured()) {
       try {
@@ -78,8 +142,27 @@ export async function POST(request: Request, context: SessionRouteContext) {
         });
         assistantContent = llmTurn.content;
         llmMeta = llmTurn.meta;
+
+        addInterviewProviderUsage({
+          sessionId: id,
+          category: "llm",
+          provider: llmTurn.meta.provider,
+          model: llmTurn.meta.model,
+          latencyMs: llmTurn.meta.latencyMs,
+          fallbackUsed: llmTurn.meta.fallbackUsed,
+          success: true,
+        });
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         console.warn("LLM interviewer turn failed, using deterministic fallback", error);
+        addInterviewProviderUsage({
+          sessionId: id,
+          category: "llm",
+          provider: "deterministic",
+          model: "fallback",
+          success: false,
+          error: message,
+        });
       }
     }
 
@@ -114,6 +197,16 @@ export async function POST(request: Request, context: SessionRouteContext) {
       endedAt: turn.kind === "wrap_up" ? new Date().toISOString() : session.endedAt,
     });
 
+    logInterviewEvent("info", "assistant_turn_generated", {
+      sessionId: id,
+      turnKind: turn.kind,
+      usedLlm: Boolean(llmMeta),
+      provider: llmMeta?.provider || "deterministic",
+      model: llmMeta?.model || "fallback",
+      fallbackUsed: llmMeta?.fallbackUsed || false,
+      clientIp,
+    });
+
     return NextResponse.json({
       session: updatedSession,
       assistantMessage,
@@ -121,7 +214,12 @@ export async function POST(request: Request, context: SessionRouteContext) {
       llm: llmMeta,
     });
   } catch (error) {
-    console.error("Error generating assistant turn", error);
+    const message = error instanceof Error ? error.message : String(error);
+    logInterviewEvent("error", "assistant_turn_error", {
+      sessionId: id,
+      error: message,
+    });
+
     return NextResponse.json(
       { error: "Unable to generate assistant turn" },
       { status: 500 }

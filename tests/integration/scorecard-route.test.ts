@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getInterviewSessionBundle = vi.fn();
 const addInterviewScore = vi.fn();
+const addInterviewProviderUsage = vi.fn();
 const updateInterviewSession = vi.fn();
 const isInterviewLlmConfigured = vi.fn();
 const generateEvaluatorScorecardWithLlm = vi.fn();
@@ -9,6 +10,7 @@ const generateEvaluatorScorecardWithLlm = vi.fn();
 vi.mock("@/lib/db", () => ({
   getInterviewSessionBundle,
   addInterviewScore,
+  addInterviewProviderUsage,
   updateInterviewSession,
 }));
 
@@ -47,6 +49,7 @@ describe("scorecard route", () => {
   beforeEach(() => {
     getInterviewSessionBundle.mockReset();
     addInterviewScore.mockReset();
+    addInterviewProviderUsage.mockReset();
     updateInterviewSession.mockReset();
     isInterviewLlmConfigured.mockReset();
     generateEvaluatorScorecardWithLlm.mockReset();

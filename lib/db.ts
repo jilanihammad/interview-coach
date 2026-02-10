@@ -37,6 +37,7 @@ const dbPath = path.join(dataDir, "launcher.db");
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("busy_timeout = 5000");
+db.pragma("foreign_keys = ON");
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS products (
@@ -68,6 +69,8 @@ CREATE TABLE IF NOT EXISTS interview_sessions (
   mode TEXT NOT NULL,
   targetDurationMinutes INTEGER,
   targetQuestionCount INTEGER,
+  consentAcceptedAt TEXT,
+  consentVersion TEXT,
   startedAt TEXT,
   endedAt TEXT,
   createdAt TEXT NOT NULL,
@@ -95,6 +98,21 @@ CREATE TABLE IF NOT EXISTS interview_scores (
   createdAt TEXT NOT NULL,
   FOREIGN KEY (sessionId) REFERENCES interview_sessions(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS interview_provider_usage (
+  id TEXT PRIMARY KEY,
+  sessionId TEXT,
+  category TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT,
+  latencyMs INTEGER,
+  fallbackUsed INTEGER,
+  success INTEGER NOT NULL,
+  error TEXT,
+  estimatedCostUsd REAL,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY (sessionId) REFERENCES interview_sessions(id) ON DELETE SET NULL
+);
 `);
 
 const ensureInterviewSessionColumn = (name: string, ddl: string) => {
@@ -110,6 +128,8 @@ const ensureInterviewSessionColumn = (name: string, ddl: string) => {
 ensureInterviewSessionColumn("customQuestions", "TEXT");
 ensureInterviewSessionColumn("personality", "TEXT");
 ensureInterviewSessionColumn("useTimeBudget", "INTEGER");
+ensureInterviewSessionColumn("consentAcceptedAt", "TEXT");
+ensureInterviewSessionColumn("consentVersion", "TEXT");
 
 const serializeJson = (value: unknown): string | null => {
   if (value === undefined) return null;
@@ -172,6 +192,8 @@ const mapRowToInterviewSession = (
     row.targetQuestionCount !== null && row.targetQuestionCount !== undefined
       ? Number(row.targetQuestionCount)
       : undefined,
+  consentAcceptedAt: row.consentAcceptedAt ? String(row.consentAcceptedAt) : undefined,
+  consentVersion: row.consentVersion ? String(row.consentVersion) : undefined,
   startedAt: row.startedAt ? String(row.startedAt) : undefined,
   endedAt: row.endedAt ? String(row.endedAt) : undefined,
   createdAt: String(row.createdAt),
@@ -338,6 +360,8 @@ export const createInterviewSession = (
     mode: input.mode,
     targetDurationMinutes: input.targetDurationMinutes,
     targetQuestionCount: input.targetQuestionCount,
+    consentAcceptedAt: input.consentAcceptedAt,
+    consentVersion: input.consentVersion,
     createdAt: now,
     updatedAt: now,
   };
@@ -345,11 +369,11 @@ export const createInterviewSession = (
   db.prepare(
     `INSERT INTO interview_sessions (
       id, status, phase, targetCompany, roleTitle, roleLevel, jobDescription, customQuestions, personality, useTimeBudget,
-      mode, targetDurationMinutes, targetQuestionCount, startedAt, endedAt,
+      mode, targetDurationMinutes, targetQuestionCount, consentAcceptedAt, consentVersion, startedAt, endedAt,
       createdAt, updatedAt
     ) VALUES (
       @id, @status, @phase, @targetCompany, @roleTitle, @roleLevel, @jobDescription, @customQuestions, @personality, @useTimeBudget,
-      @mode, @targetDurationMinutes, @targetQuestionCount, @startedAt, @endedAt,
+      @mode, @targetDurationMinutes, @targetQuestionCount, @consentAcceptedAt, @consentVersion, @startedAt, @endedAt,
       @createdAt, @updatedAt
     )`
   ).run({
@@ -374,6 +398,29 @@ export const getInterviewSessionById = (id: string): InterviewSession | null => 
     .get(id) as Record<string, unknown> | undefined;
   if (!row) return null;
   return mapRowToInterviewSession(row);
+};
+
+export const deleteInterviewSession = (id: string): boolean => {
+  const result = db.prepare("DELETE FROM interview_sessions WHERE id = ?").run(id);
+  return result.changes > 0;
+};
+
+export const purgeInterviewSessionsOlderThanDays = (retentionDays: number): number => {
+  const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  const cutoffIso = new Date(cutoffMs).toISOString();
+  const result = db
+    .prepare("DELETE FROM interview_sessions WHERE updatedAt < ?")
+    .run(cutoffIso);
+  return result.changes;
+};
+
+export const pingDatabase = (): boolean => {
+  try {
+    db.prepare("SELECT 1").get();
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 export const updateInterviewSession = (
@@ -520,4 +567,38 @@ export const getInterviewSessionBundle = (
     messages: listInterviewMessages(sessionId),
     scores: listInterviewScores(sessionId),
   };
+};
+
+export type InterviewProviderUsageInput = {
+  sessionId?: string;
+  category: "llm" | "stt" | "tts";
+  provider: string;
+  model?: string;
+  latencyMs?: number;
+  fallbackUsed?: boolean;
+  success: boolean;
+  error?: string;
+  estimatedCostUsd?: number;
+};
+
+export const addInterviewProviderUsage = (input: InterviewProviderUsageInput): void => {
+  db.prepare(
+    `INSERT INTO interview_provider_usage (
+      id, sessionId, category, provider, model, latencyMs, fallbackUsed, success, error, estimatedCostUsd, createdAt
+    ) VALUES (
+      @id, @sessionId, @category, @provider, @model, @latencyMs, @fallbackUsed, @success, @error, @estimatedCostUsd, @createdAt
+    )`
+  ).run({
+    id: uuidv4(),
+    sessionId: input.sessionId ?? null,
+    category: input.category,
+    provider: input.provider,
+    model: input.model ?? null,
+    latencyMs: input.latencyMs ?? null,
+    fallbackUsed: input.fallbackUsed === undefined ? null : input.fallbackUsed ? 1 : 0,
+    success: input.success ? 1 : 0,
+    error: input.error ?? null,
+    estimatedCostUsd: input.estimatedCostUsd ?? null,
+    createdAt: new Date().toISOString(),
+  });
 };

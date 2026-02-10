@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getInterviewSessionById = vi.fn();
 const addInterviewMessage = vi.fn();
+const addInterviewProviderUsage = vi.fn();
 const listInterviewMessages = vi.fn();
 const updateInterviewSession = vi.fn();
 const nextAssistantTurn = vi.fn();
@@ -11,6 +12,7 @@ const generateInterviewerTurnWithLlm = vi.fn();
 vi.mock("@/lib/db", () => ({
   getInterviewSessionById,
   addInterviewMessage,
+  addInterviewProviderUsage,
   listInterviewMessages,
   updateInterviewSession,
 }));
@@ -40,6 +42,7 @@ describe("assistant-turn route", () => {
     addInterviewMessage.mockReset();
     listInterviewMessages.mockReset();
     updateInterviewSession.mockReset();
+    addInterviewProviderUsage.mockReset();
     nextAssistantTurn.mockReset();
     isInterviewLlmConfigured.mockReset();
     generateInterviewerTurnWithLlm.mockReset();

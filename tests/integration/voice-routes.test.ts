@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getInterviewSessionById = vi.fn();
+const addInterviewProviderUsage = vi.fn();
 const transcribeAudio = vi.fn();
 const synthesizeSpeech = vi.fn();
 const getVoiceCapabilities = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   getInterviewSessionById,
+  addInterviewProviderUsage,
 }));
 
 vi.mock("@/lib/interview/server-voice", () => ({
@@ -22,6 +24,7 @@ const voiceRoute = await import("@/app/api/interview/voice/route");
 describe("voice routes", () => {
   beforeEach(() => {
     getInterviewSessionById.mockReset();
+    addInterviewProviderUsage.mockReset();
     transcribeAudio.mockReset();
     synthesizeSpeech.mockReset();
     getVoiceCapabilities.mockReset();
@@ -71,7 +74,16 @@ describe("voice routes", () => {
   });
 
   it("stt returns transcript on success", async () => {
-    transcribeAudio.mockResolvedValue("hello world");
+    transcribeAudio.mockResolvedValue({
+      transcript: "hello world",
+      meta: {
+        provider: "openai",
+        model: "whisper-1",
+        fallbackUsed: false,
+        latencyMs: 120,
+        attempts: 1,
+      },
+    });
 
     const form = new FormData();
     form.append("audio", new File([new Uint8Array([1, 2, 3])], "a.webm", { type: "audio/webm" }));
@@ -108,7 +120,16 @@ describe("voice routes", () => {
   });
 
   it("tts returns audio/mpeg on success", async () => {
-    synthesizeSpeech.mockResolvedValue(Buffer.from([1, 2, 3]));
+    synthesizeSpeech.mockResolvedValue({
+      audioBuffer: Buffer.from([1, 2, 3]),
+      meta: {
+        provider: "openai",
+        model: "gpt-4o-mini-tts",
+        fallbackUsed: false,
+        latencyMs: 140,
+        attempts: 1,
+      },
+    });
 
     const res = await ttsRoute.POST(
       new Request("http://localhost", {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import {
+  addInterviewProviderUsage,
   addInterviewScore,
   getInterviewSessionBundle,
   updateInterviewSession,
@@ -14,6 +15,8 @@ import {
   generateEvaluatorScorecardWithLlm,
   isInterviewLlmConfigured,
 } from "@/lib/interview/llm";
+import { logInterviewEvent } from "@/lib/interview/observability";
+import { consumeRateLimit, getClientIp, readEnvInt } from "@/lib/interview/rate-limit";
 
 type SessionRouteContext = { params: Promise<{ id: string }> };
 
@@ -28,6 +31,12 @@ type DimensionScore = {
 };
 
 const scorecardInFlight = new Set<string>();
+
+const SCORECARD_RATE_LIMIT = readEnvInt("INTERVIEW_RATE_SCORECARD", 10);
+const SCORECARD_RATE_WINDOW_MS = readEnvInt(
+  "INTERVIEW_RATE_SCORECARD_WINDOW_MS",
+  10 * 60 * 1000
+);
 
 const dimensionLabels: Record<InterviewScoreDimension, string> = {
   star_structure: "STAR structure",
@@ -226,8 +235,27 @@ function summaryFromLlmOrFallback(
   };
 }
 
-export async function POST(_request: Request, context: SessionRouteContext) {
+export async function POST(request: Request, context: SessionRouteContext) {
   const { id } = await context.params;
+
+  const clientIp = getClientIp(request);
+  const rateLimit = consumeRateLimit(
+    `scorecard:${clientIp}:${id}`,
+    SCORECARD_RATE_LIMIT,
+    SCORECARD_RATE_WINDOW_MS
+  );
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many scorecard requests. Please try again shortly." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimit.retryAfterSec),
+        },
+      }
+    );
+  }
 
   if (scorecardInFlight.has(id)) {
     return NextResponse.json({ error: "Scorecard generation in progress" }, { status: 409 });
@@ -280,7 +308,15 @@ export async function POST(_request: Request, context: SessionRouteContext) {
     let savedScores = bundle.scores;
     let generated = false;
     let summary: InterviewFeedbackSummary;
-    let scoringMeta: { provider: string; model: string; fallbackUsed: boolean } | null = null;
+    let scoringMeta:
+      | {
+          provider: string;
+          model: string;
+          fallbackUsed: boolean;
+          latencyMs?: number;
+          attempts?: number;
+        }
+      | null = null;
 
     if (savedScores.length === 0) {
       if (isInterviewLlmConfigured()) {
@@ -302,7 +338,18 @@ export async function POST(_request: Request, context: SessionRouteContext) {
           );
           scoringMeta = llmScorecard.meta;
           generated = true;
+
+          addInterviewProviderUsage({
+            sessionId: id,
+            category: "llm",
+            provider: llmScorecard.meta.provider,
+            model: llmScorecard.meta.model,
+            latencyMs: llmScorecard.meta.latencyMs,
+            fallbackUsed: llmScorecard.meta.fallbackUsed,
+            success: true,
+          });
         } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
           console.warn("LLM evaluator failed, using deterministic score fallback", error);
           const scoresToSave = computeScores(candidateAnswers);
           savedScores = scoresToSave.map((item) =>
@@ -315,6 +362,15 @@ export async function POST(_request: Request, context: SessionRouteContext) {
             avgWordCountValue
           );
           generated = true;
+
+          addInterviewProviderUsage({
+            sessionId: id,
+            category: "llm",
+            provider: "deterministic",
+            model: "fallback",
+            success: false,
+            error: message,
+          });
         }
       } else {
         const scoresToSave = computeScores(candidateAnswers);
@@ -344,6 +400,15 @@ export async function POST(_request: Request, context: SessionRouteContext) {
       endedAt: bundle.session.endedAt ?? new Date().toISOString(),
     });
 
+    logInterviewEvent("info", "scorecard_generated", {
+      sessionId: id,
+      generated,
+      provider: scoringMeta?.provider || "deterministic",
+      model: scoringMeta?.model || "fallback",
+      fallbackUsed: scoringMeta?.fallbackUsed || false,
+      clientIp,
+    });
+
     return NextResponse.json({
       session: {
         ...bundle.session,
@@ -356,7 +421,12 @@ export async function POST(_request: Request, context: SessionRouteContext) {
       llm: scoringMeta,
     });
   } catch (error) {
-    console.error("Error generating scorecard", error);
+    const message = error instanceof Error ? error.message : String(error);
+    logInterviewEvent("error", "scorecard_error", {
+      sessionId: id,
+      error: message,
+    });
+
     return NextResponse.json({ error: "Unable to generate scorecard" }, { status: 500 });
   } finally {
     scorecardInFlight.delete(id);

@@ -24,6 +24,24 @@ const DEFAULT_OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "alloy";
 type TtsProvider = "elevenlabs" | "openai";
 type SttProvider = "deepgram" | "openai" | "whisper";
 
+export type ProviderRunMeta = {
+  provider: string;
+  model?: string;
+  fallbackUsed: boolean;
+  latencyMs: number;
+  attempts: number;
+};
+
+export type SttResult = {
+  transcript: string;
+  meta: ProviderRunMeta;
+};
+
+export type TtsResult = {
+  audioBuffer: Buffer;
+  meta: ProviderRunMeta;
+};
+
 export type VoiceCapabilities = {
   sttServerAvailable: boolean;
   ttsServerAvailable: boolean;
@@ -96,6 +114,17 @@ function resolveTtsProvider(): TtsProvider | null {
   if (available.includes("openai")) return "openai";
   if (available.includes("elevenlabs")) return "elevenlabs";
   return null;
+}
+
+function sttModelForProvider(provider: SttProvider): string {
+  if (provider === "deepgram") return DEFAULT_DEEPGRAM_MODEL;
+  if (provider === "openai") return DEFAULT_OPENAI_STT_MODEL;
+  return DEFAULT_WHISPER_MODEL;
+}
+
+function ttsModelForProvider(provider: TtsProvider): string {
+  if (provider === "openai") return DEFAULT_OPENAI_TTS_MODEL;
+  return DEFAULT_ELEVENLABS_MODEL;
 }
 
 function resolveSttProviderChain(): SttProvider[] {
@@ -299,7 +328,7 @@ export async function transcribeAudioWithWhisper(
 export async function transcribeAudio(
   audioBuffer: Buffer,
   mimeType: string
-): Promise<string> {
+): Promise<SttResult> {
   const chain = resolveSttProviderChain();
 
   if (chain.length === 0) {
@@ -308,17 +337,28 @@ export async function transcribeAudio(
 
   const errors: string[] = [];
 
-  for (const provider of chain) {
+  for (let index = 0; index < chain.length; index += 1) {
+    const provider = chain[index];
+    const startedAt = Date.now();
+
     try {
-      if (provider === "deepgram") {
-        return await transcribeAudioWithDeepgram(audioBuffer, mimeType);
-      }
+      const transcript =
+        provider === "deepgram"
+          ? await transcribeAudioWithDeepgram(audioBuffer, mimeType)
+          : provider === "openai"
+            ? await transcribeAudioWithOpenAI(audioBuffer, mimeType)
+            : await transcribeAudioWithWhisper(audioBuffer, mimeType);
 
-      if (provider === "openai") {
-        return await transcribeAudioWithOpenAI(audioBuffer, mimeType);
-      }
-
-      return await transcribeAudioWithWhisper(audioBuffer, mimeType);
+      return {
+        transcript,
+        meta: {
+          provider,
+          model: sttModelForProvider(provider),
+          fallbackUsed: index > 0,
+          latencyMs: Date.now() - startedAt,
+          attempts: index + 1,
+        },
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       errors.push(`${provider}: ${message}`);
@@ -389,16 +429,27 @@ export async function synthesizeSpeechWithOpenAI(text: string): Promise<Buffer> 
   return Buffer.from(audio);
 }
 
-export async function synthesizeSpeech(text: string): Promise<Buffer> {
+export async function synthesizeSpeech(text: string): Promise<TtsResult> {
   const provider = resolveTtsProvider();
 
   if (!provider) {
     throw new Error("No TTS provider configured");
   }
 
-  if (provider === "openai") {
-    return synthesizeSpeechWithOpenAI(text);
-  }
+  const startedAt = Date.now();
+  const audioBuffer =
+    provider === "openai"
+      ? await synthesizeSpeechWithOpenAI(text)
+      : await synthesizeSpeechWithElevenLabs(text);
 
-  return synthesizeSpeechWithElevenLabs(text);
+  return {
+    audioBuffer,
+    meta: {
+      provider,
+      model: ttsModelForProvider(provider),
+      fallbackUsed: false,
+      latencyMs: Date.now() - startedAt,
+      attempts: 1,
+    },
+  };
 }
