@@ -33,5 +33,11 @@ If provider API keys are missing, the app automatically falls back:
 - Voice: browser capture/speech synthesis mode
 - Interview turns + scorecard: deterministic engine/scoring
 
+## Engineering docs
+- Comprehensive onboarding + architecture + rollout hardening guide:
+  - `docs/ENGINEERING_GUIDE.md`
+- QA execution matrix:
+  - `docs/QA_MATRIX.md`
+
 ## Notes
 This repo was split out from Launcher so Launcher can stay focused on startup launch workflows.
